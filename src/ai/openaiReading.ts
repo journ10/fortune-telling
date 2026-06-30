@@ -3,12 +3,14 @@ import type { AiProvider } from './aiSettings';
 
 export const DEFAULT_AI_MODELS: Record<AiProvider, string> = {
   openai: 'gpt-5.5',
-  anthropic: 'claude-sonnet-4-6'
+  anthropic: 'claude-sonnet-4-6',
+  deepseek: 'deepseek-v4-flash'
 };
 
 export const DEFAULT_AI_URLS: Record<AiProvider, string> = {
   openai: 'https://api.openai.com/v1/chat/completions',
-  anthropic: 'https://api.anthropic.com/v1/messages'
+  anthropic: 'https://api.anthropic.com/v1/messages',
+  deepseek: 'https://api.deepseek.com'
 };
 
 interface AiReadingOptions {
@@ -103,6 +105,14 @@ function normalizeApiUrl(provider: AiProvider, rawUrl: string): string {
     return `${url}/v1/messages`;
   }
 
+  if (provider === 'deepseek') {
+    if (url.endsWith('/chat/completions')) {
+      return url;
+    }
+
+    return `${url}/chat/completions`;
+  }
+
   if (url.endsWith('/chat/completions')) {
     return url;
   }
@@ -156,7 +166,7 @@ function buildProviderRequest(
       model,
       messages: [
         {
-          role: 'developer',
+          role: 'system',
           content: buildInstructions()
         },
         {

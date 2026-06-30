@@ -91,6 +91,7 @@ export default function QuestionEntry({
             >
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
+              <option value="deepseek">DeepSeek</option>
             </select>
           </label>
 

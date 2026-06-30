@@ -1,6 +1,6 @@
 import { DEFAULT_AI_MODELS, DEFAULT_AI_URLS } from './openaiReading';
 
-export type AiProvider = 'openai' | 'anthropic';
+export type AiProvider = 'openai' | 'anthropic' | 'deepseek';
 
 export interface AiSettings {
   provider: AiProvider;

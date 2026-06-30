@@ -66,7 +66,7 @@ describe('createAiInterpretation', () => {
     const request = JSON.parse(fetchCalls[0][1]?.body as string);
     expect(request.model).toBe('gpt-4o-mini');
     expect(request.messages).toEqual([
-      expect.objectContaining({ role: 'developer', content: expect.stringContaining('周易') }),
+      expect.objectContaining({ role: 'system', content: expect.stringContaining('周易') }),
       expect.objectContaining({ role: 'user', content: expect.stringContaining('今日运势') })
     ]);
     expect(result.headline).toBe('AI：夬卦重在明断');
@@ -198,6 +198,49 @@ describe('createAiInterpretation', () => {
     expect(fetcher).toHaveBeenCalledWith(
       'https://api.anthropic.com/v1/messages',
       expect.any(Object)
+    );
+  });
+
+  it('accepts a DeepSeek base URL and appends the OpenAI-compatible path', async () => {
+    const { interpretation, tosses } = makeInterpretation();
+    const fetchCalls: Array<[RequestInfo | URL, RequestInit?]> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push([input, init]);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  headline: 'DeepSeek：base URL 可用',
+                  plainText: '已自动补齐 DeepSeek 路径。',
+                  advice: ['继续']
+                })
+              }
+            }
+          ]
+        }),
+        text: async () => ''
+      };
+    });
+
+    await createAiInterpretation(interpretation, tosses, {
+      apiKey: 'sk-deepseek-user',
+      apiUrl: 'https://api.deepseek.com',
+      model: 'deepseek-v4-flash',
+      provider: 'deepseek',
+      fetcher
+    });
+
+    const request = JSON.parse(fetchCalls[0][1]?.body as string);
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://api.deepseek.com/chat/completions',
+      expect.any(Object)
+    );
+    expect(request.messages[0]).toEqual(
+      expect.objectContaining({ role: 'system', content: expect.stringContaining('JSON') })
     );
   });
 

@@ -155,4 +155,56 @@ describe('App', () => {
       })
     );
   });
+
+  it('switches provider defaults and sends a DeepSeek chat request', async () => {
+    const user = userEvent.setup();
+    const fetchCalls: Array<[RequestInfo | URL, RequestInit?]> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push([input, init]);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  headline: 'DeepSeek：顺势而断',
+                  plainText: 'DeepSeek 使用 OpenAI-compatible 格式完成解读。',
+                  advice: ['守住问题边界', '看清动爻变化', '再决定下一步']
+                })
+              }
+            }
+          ]
+        }),
+        text: async () => ''
+      };
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(<App />);
+
+    await user.selectOptions(screen.getByLabelText('Provider'), 'deepseek');
+    expect(screen.getByLabelText('API URL')).toHaveValue('https://api.deepseek.com');
+    expect(screen.getByLabelText('模型')).toHaveValue('deepseek-v4-flash');
+    await user.type(screen.getByLabelText('API Key'), 'sk-deepseek-user');
+    await user.click(screen.getByRole('button', { name: '今日运势' }));
+    await user.click(screen.getByRole('button', { name: '开始起卦' }));
+
+    for (let index = 0; index < 6; index += 1) {
+      await user.click(screen.getByRole('button', { name: '手动掷一次' }));
+    }
+
+    expect(await screen.findByRole('heading', { name: 'DeepSeek：顺势而断' })).toBeInTheDocument();
+    const request = JSON.parse(fetchCalls[0][1]?.body as string);
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://api.deepseek.com/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer sk-deepseek-user'
+        })
+      })
+    );
+    expect(request.messages[0]).toEqual(expect.objectContaining({ role: 'system' }));
+  });
 });
