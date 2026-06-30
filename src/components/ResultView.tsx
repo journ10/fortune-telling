@@ -1,4 +1,6 @@
+import { buildCasting } from '../domain/coinToss';
 import type { CoinToss, Interpretation } from '../domain/types';
+import HexagramLines from './HexagramLines';
 
 interface ResultViewProps {
   interpretation: Interpretation;
@@ -20,6 +22,7 @@ function formatMovingLines(interpretation: Interpretation): string {
 
 export function ResultView({ interpretation, tosses, onReset }: ResultViewProps) {
   const changedHexagramName = interpretation.changedHexagram?.name ?? '无变卦';
+  const lines = buildCasting(interpretation.question, interpretation.questionType, tosses).lines;
 
   return (
     <section className="resultPanel" aria-labelledby="result-title">
@@ -43,6 +46,11 @@ export function ResultView({ interpretation, tosses, onReset }: ResultViewProps)
             <dd>{formatMovingLines(interpretation)}</dd>
           </div>
         </dl>
+      </section>
+
+      <section className="readingBlock" aria-labelledby="hexagram-lines-title">
+        <h2 id="hexagram-lines-title">本卦卦象</h2>
+        <HexagramLines lines={lines} />
       </section>
 
       <section className="readingBlock" aria-labelledby="plain-reading-title">

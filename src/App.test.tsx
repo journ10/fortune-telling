@@ -13,6 +13,8 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '今日运势' }));
     await user.click(screen.getByRole('button', { name: '开始起卦' }));
 
+    expect(screen.getByText(/MediaPipe CDN/)).toBeInTheDocument();
+
     for (let index = 0; index < 6; index += 1) {
       await user.click(screen.getByRole('button', { name: '手动掷一次' }));
 
