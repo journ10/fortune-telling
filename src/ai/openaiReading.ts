@@ -60,7 +60,7 @@ export async function createAiInterpretation(
   const provider = options.provider;
   const apiKey = options.apiKey.trim();
   const model = options.model.trim() || DEFAULT_AI_MODELS[provider];
-  const apiUrl = options.apiUrl.trim() || DEFAULT_AI_URLS[provider];
+  const apiUrl = normalizeApiUrl(provider, options.apiUrl.trim() || DEFAULT_AI_URLS[provider]);
 
   if (!apiKey) {
     throw new Error('缺少 AI API Key');
@@ -86,6 +86,32 @@ export async function createAiInterpretation(
     plainText: patch.plainText,
     advice: patch.advice
   };
+}
+
+function normalizeApiUrl(provider: AiProvider, rawUrl: string): string {
+  const url = rawUrl.replace(/\/+$/, '');
+
+  if (provider === 'anthropic') {
+    if (url.endsWith('/messages')) {
+      return url;
+    }
+
+    if (url.endsWith('/v1')) {
+      return `${url}/messages`;
+    }
+
+    return `${url}/v1/messages`;
+  }
+
+  if (url.endsWith('/chat/completions')) {
+    return url;
+  }
+
+  if (url.endsWith('/v1')) {
+    return `${url}/chat/completions`;
+  }
+
+  return `${url}/v1/chat/completions`;
 }
 
 function buildProviderRequest(

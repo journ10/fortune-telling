@@ -132,6 +132,75 @@ describe('createAiInterpretation', () => {
     expect(result.basis).toBe(interpretation.basis);
   });
 
+  it('accepts an OpenAI base URL and appends the Chat Completions path', async () => {
+    const { interpretation, tosses } = makeInterpretation();
+    const fetcher = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                headline: 'AI：base URL 可用',
+                plainText: '已自动补齐 OpenAI 路径。',
+                advice: ['继续']
+              })
+            }
+          }
+        ]
+      }),
+      text: async () => ''
+    }));
+
+    await createAiInterpretation(interpretation, tosses, {
+      apiKey: 'sk-user',
+      apiUrl: 'https://api.openai.com',
+      model: 'gpt-4o-mini',
+      provider: 'openai',
+      fetcher
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/chat/completions',
+      expect.any(Object)
+    );
+  });
+
+  it('accepts an Anthropic base URL and appends the Messages path', async () => {
+    const { interpretation, tosses } = makeInterpretation();
+    const fetcher = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              headline: 'Claude：base URL 可用',
+              plainText: '已自动补齐 Anthropic 路径。',
+              advice: ['继续']
+            })
+          }
+        ]
+      }),
+      text: async () => ''
+    }));
+
+    await createAiInterpretation(interpretation, tosses, {
+      apiKey: 'sk-ant-user',
+      apiUrl: 'https://api.anthropic.com',
+      model: 'claude-sonnet-4-6',
+      provider: 'anthropic',
+      fetcher
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://api.anthropic.com/v1/messages',
+      expect.any(Object)
+    );
+  });
+
   it('rejects empty user keys before sending a request', async () => {
     const { interpretation, tosses } = makeInterpretation();
     const fetcher = vi.fn();

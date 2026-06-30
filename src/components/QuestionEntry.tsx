@@ -77,7 +77,7 @@ export default function QuestionEntry({
           <p className="eyebrow">可选 AI 解卦</p>
           <h2 id="ai-settings-title">AI Provider</h2>
           <p className="aiSettingsCopy">
-            使用你自己的 API Key。Key 只保存在当前页面状态里，刷新后需要重新输入。
+            使用你自己的 API Key。API URL 可以填 base URL 或完整 endpoint；Key 只保存在当前页面状态里。
           </p>
         </div>
 
