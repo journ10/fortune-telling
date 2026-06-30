@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { AiSettings } from '../ai/aiSettings';
 import type { QuestionType } from '../domain/types';
 
 const QUICK_QUESTIONS: Array<{ label: string; question: string; type: QuestionType }> = [
@@ -10,10 +11,16 @@ const QUICK_QUESTIONS: Array<{ label: string; question: string; type: QuestionTy
 ];
 
 interface QuestionEntryProps {
+  aiSettings: AiSettings;
   onStart: (question: string, questionType: QuestionType) => void;
+  onAiSettingsChange: (settings: AiSettings) => void;
 }
 
-export default function QuestionEntry({ onStart }: QuestionEntryProps) {
+export default function QuestionEntry({
+  aiSettings,
+  onStart,
+  onAiSettingsChange
+}: QuestionEntryProps) {
   const [question, setQuestion] = useState('');
   const [questionType, setQuestionType] = useState<QuestionType>('general');
   const trimmedQuestion = question.trim();
@@ -56,6 +63,68 @@ export default function QuestionEntry({ onStart }: QuestionEntryProps) {
         }}
         placeholder="写下一个清晰、具体的问题"
       />
+
+      <section className="aiSettings" aria-labelledby="ai-settings-title">
+        <div>
+          <p className="eyebrow">可选 AI 解卦</p>
+          <h2 id="ai-settings-title">Chat Completions</h2>
+          <p className="aiSettingsCopy">
+            使用你自己的 OpenAI API Key。Key 只保存在当前页面状态里，刷新后需要重新输入。
+          </p>
+        </div>
+
+        <div className="aiSettingsGrid">
+          <label className="aiField" htmlFor="openai-api-key">
+            <span>OpenAI API Key</span>
+            <input
+              autoComplete="off"
+              id="openai-api-key"
+              spellCheck={false}
+              type="password"
+              value={aiSettings.apiKey}
+              onChange={(event) =>
+                onAiSettingsChange({
+                  ...aiSettings,
+                  apiKey: event.target.value
+                })
+              }
+              placeholder="sk-..."
+            />
+          </label>
+
+          <label className="aiField" htmlFor="openai-model">
+            <span>Chat Completions 模型</span>
+            <input
+              autoComplete="off"
+              id="openai-model"
+              spellCheck={false}
+              type="text"
+              value={aiSettings.model}
+              onChange={(event) =>
+                onAiSettingsChange({
+                  ...aiSettings,
+                  model: event.target.value
+                })
+              }
+            />
+          </label>
+        </div>
+
+        {aiSettings.apiKey ? (
+          <button
+            className="secondaryButton"
+            type="button"
+            onClick={() =>
+              onAiSettingsChange({
+                ...aiSettings,
+                apiKey: ''
+              })
+            }
+          >
+            清除 Key
+          </button>
+        ) : null}
+      </section>
 
       <button
         className="primaryButton"

@@ -1,8 +1,10 @@
+import type { AiReadingStatus } from '../ai/aiStatus';
 import { buildCasting } from '../domain/coinToss';
 import type { CoinToss, Interpretation } from '../domain/types';
 import HexagramLines from './HexagramLines';
 
 interface ResultViewProps {
+  aiStatus?: AiReadingStatus;
   interpretation: Interpretation;
   tosses: CoinToss[];
   onReset: () => void;
@@ -20,7 +22,7 @@ function formatMovingLines(interpretation: Interpretation): string {
   return interpretation.movingLines.map((line) => line.title).join('、');
 }
 
-export function ResultView({ interpretation, tosses, onReset }: ResultViewProps) {
+export function ResultView({ aiStatus, interpretation, tosses, onReset }: ResultViewProps) {
   const changedHexagramName = interpretation.changedHexagram?.name ?? '无变卦';
   const lines = buildCasting(interpretation.question, interpretation.questionType, tosses).lines;
 
@@ -29,6 +31,10 @@ export function ResultView({ interpretation, tosses, onReset }: ResultViewProps)
       <p className="eyebrow">卦象结果</p>
       <h1 id="result-title">卦象结果：{interpretation.originalHexagram.name}</h1>
       <p className="questionEcho">{interpretation.question}</p>
+
+      {aiStatus ? (
+        <p className={`aiStatus aiStatus-${aiStatus.state}`}>{aiStatus.message}</p>
+      ) : null}
 
       <section className="readingBlock" aria-label="解读摘要">
         <h2>{interpretation.headline}</h2>
