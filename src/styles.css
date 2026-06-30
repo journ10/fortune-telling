@@ -1,0 +1,55 @@
+:root {
+  color: #f6efe0;
+  background: #11100d;
+  font-family: "Songti SC", "Noto Serif CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.appShell {
+  min-height: 100vh;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(204, 151, 62, 0.18), transparent 34rem),
+    linear-gradient(135deg, #16130f 0%, #0f1115 58%, #18140f 100%);
+}
+
+.heroPanel {
+  width: min(960px, 100%);
+  margin: 0 auto;
+  padding: 32px 0;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #d7aa61;
+  letter-spacing: 0;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2.25rem, 8vw, 5rem);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.intro {
+  max-width: 36rem;
+  color: #d8ccba;
+  font-size: 1.125rem;
+  line-height: 1.7;
+}
