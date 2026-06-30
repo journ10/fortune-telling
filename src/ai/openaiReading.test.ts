@@ -147,4 +147,19 @@ describe('createAiInterpretation', () => {
     ).rejects.toThrow('缺少 AI API Key');
     expect(fetcher).not.toHaveBeenCalled();
   });
+
+  it('surfaces non-JSON provider errors without rereading the response body', async () => {
+    const { interpretation, tosses } = makeInterpretation();
+    const fetcher = vi.fn(async () => new Response('proxy upstream denied', { status: 502 }));
+
+    await expect(
+      createAiInterpretation(interpretation, tosses, {
+        apiKey: 'sk-user',
+        apiUrl: 'https://gateway.example/openai/chat/completions',
+        model: 'gpt-4o-mini',
+        provider: 'openai',
+        fetcher
+      })
+    ).rejects.toThrow('proxy upstream denied');
+  });
 });

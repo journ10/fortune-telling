@@ -232,12 +232,20 @@ function parseAiReadingPatch(text: string): AiReadingPatch {
   };
 }
 
-async function readProviderError(response: Pick<Response, 'status' | 'json' | 'text'>): Promise<string> {
+async function readProviderError(response: Pick<Response, 'status' | 'text'>): Promise<string> {
   try {
-    const body = (await response.json()) as OpenAiChatCompletionBody | AnthropicMessagesBody;
-    return body.error?.message ?? `AI 请求失败，状态码 ${response.status}`;
-  } catch {
     const text = await response.text();
-    return text || `AI 请求失败，状态码 ${response.status}`;
+    if (!text.trim()) {
+      return `AI 请求失败，状态码 ${response.status}`;
+    }
+
+    try {
+      const body = JSON.parse(text) as OpenAiChatCompletionBody | AnthropicMessagesBody;
+      return body.error?.message ?? text;
+    } catch {
+      return text;
+    }
+  } catch {
+    return `AI 请求失败，状态码 ${response.status}`;
   }
 }
