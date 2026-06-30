@@ -12,18 +12,21 @@ const QUICK_QUESTIONS: Array<{ label: string; question: string; type: QuestionTy
 
 interface QuestionEntryProps {
   aiSettings: AiSettings;
+  isAiConfigured: boolean;
   onStart: (question: string, questionType: QuestionType) => void;
   onAiSettingsChange: (settings: AiSettings) => void;
 }
 
 export default function QuestionEntry({
   aiSettings,
+  isAiConfigured,
   onStart,
   onAiSettingsChange
 }: QuestionEntryProps) {
   const [question, setQuestion] = useState('');
   const [questionType, setQuestionType] = useState<QuestionType>('general');
   const trimmedQuestion = question.trim();
+  const canStart = Boolean(trimmedQuestion && isAiConfigured);
   const updateProvider = (provider: AiProvider) => {
     const providerDefaults = getDefaultProviderSettings(provider);
     onAiSettingsChange({
@@ -74,10 +77,10 @@ export default function QuestionEntry({
 
       <section className="aiSettings" aria-labelledby="ai-settings-title">
         <div>
-          <p className="eyebrow">可选 AI 解卦</p>
+          <p className="eyebrow">AI 解卦为必填</p>
           <h2 id="ai-settings-title">AI Provider</h2>
           <p className="aiSettingsCopy">
-            使用你自己的 API Key。API URL 可以填 base URL 或完整 endpoint；Key 只保存在当前页面状态里。
+            使用你自己的 API Key。API URL 可以填 base URL 或完整 endpoint；Key 只保存在当前页面状态里，不写入仓库或浏览器存储。
           </p>
         </div>
 
@@ -162,15 +165,19 @@ export default function QuestionEntry({
             清除 Key
           </button>
         ) : null}
+
+        <p className={`aiRequiredHint ${isAiConfigured ? 'aiRequiredHint-ready' : ''}`}>
+          {isAiConfigured ? 'AI 配置已就绪，起卦后将直接请求解卦。' : '需要填写 API URL、API Key 和模型后才能起卦。'}
+        </p>
       </section>
 
       <button
         className="primaryButton"
         type="button"
-        disabled={!trimmedQuestion}
+        disabled={!canStart}
         onClick={() => onStart(trimmedQuestion, questionType)}
       >
-        开始起卦
+        {canStart ? '开始起卦' : trimmedQuestion ? '配置 AI 后起卦' : '先写所问之事'}
       </button>
     </section>
   );

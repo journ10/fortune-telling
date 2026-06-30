@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_AI_SETTINGS } from './ai/aiSettings';
-import { TEMPLATE_READING_STATUS } from './ai/aiStatus';
+import type { AiReadingStatus } from './ai/aiStatus';
 import { createAiInterpretation } from './ai/openaiReading';
 import CastingStage from './components/CastingStage';
 import QuestionEntry from './components/QuestionEntry';
 import ResultView from './components/ResultView';
 import { buildCasting } from './domain/coinToss';
-import type { CastLine, CoinToss, Interpretation, QuestionType } from './domain/types';
+import type { AiInterpretation, CastLine, CoinToss, QuestionType } from './domain/types';
 import { useCastingSession } from './hooks/useCastingSession';
 
 function buildCastingForDisplay(
@@ -28,26 +28,33 @@ function buildCastingForDisplay(
 export default function App() {
   const session = useCastingSession();
   const [aiSettings, setAiSettings] = useState(DEFAULT_AI_SETTINGS);
-  const [aiInterpretation, setAiInterpretation] = useState<Interpretation | null>(null);
-  const [aiStatus, setAiStatus] = useState(TEMPLATE_READING_STATUS);
+  const [aiInterpretation, setAiInterpretation] = useState<AiInterpretation | null>(null);
+  const [aiStatus, setAiStatus] = useState<AiReadingStatus | null>(null);
+  const isAiConfigured = Boolean(
+    aiSettings.apiKey.trim() && aiSettings.apiUrl.trim() && aiSettings.model.trim()
+  );
   const displayLines = buildCastingForDisplay(
     session.question,
     session.questionType,
     session.tosses
   );
-  const displayInterpretation = aiInterpretation ?? session.interpretation;
 
   useEffect(() => {
-    if (session.phase !== 'result' || !session.interpretation) {
+    if (session.phase !== 'result' || !session.castingResult) {
       setAiInterpretation(null);
-      setAiStatus(TEMPLATE_READING_STATUS);
+      setAiStatus(null);
       return;
     }
 
     const apiKey = aiSettings.apiKey.trim();
-    if (!apiKey) {
+    const apiUrl = aiSettings.apiUrl.trim();
+    const model = aiSettings.model.trim();
+    if (!apiKey || !apiUrl || !model) {
       setAiInterpretation(null);
-      setAiStatus(TEMPLATE_READING_STATUS);
+      setAiStatus({
+        state: 'error',
+        message: 'AI 解卦需要 API URL、API Key 和模型，请重新起卦前补全配置。'
+      });
       return;
     }
 
@@ -58,10 +65,10 @@ export default function App() {
       message: 'AI 正在基于传统依据解卦，卦辞和爻辞保持原文。'
     });
 
-    createAiInterpretation(session.interpretation, session.tosses, {
+    createAiInterpretation(session.castingResult, session.tosses, {
       apiKey,
-      apiUrl: aiSettings.apiUrl,
-      model: aiSettings.model,
+      apiUrl,
+      model,
       provider: aiSettings.provider,
       signal: controller.signal
     })
@@ -84,7 +91,7 @@ export default function App() {
         const message = error instanceof Error ? error.message : '未知错误';
         setAiStatus({
           state: 'error',
-          message: `AI 解卦失败，已回退传统模板：${message}`
+          message: `AI 解卦失败：${message}`
         });
       });
 
@@ -96,7 +103,7 @@ export default function App() {
     aiSettings.apiUrl,
     aiSettings.model,
     aiSettings.provider,
-    session.interpretation,
+    session.castingResult,
     session.phase,
     session.tosses
   ]);
@@ -106,6 +113,7 @@ export default function App() {
       {session.phase === 'question' ? (
         <QuestionEntry
           aiSettings={aiSettings}
+          isAiConfigured={isAiConfigured}
           onAiSettingsChange={setAiSettings}
           onStart={session.start}
         />
@@ -119,10 +127,11 @@ export default function App() {
           onManualToss={session.addRandomToss}
         />
       ) : null}
-      {session.phase === 'result' && displayInterpretation ? (
+      {session.phase === 'result' && session.castingResult ? (
         <ResultView
           aiStatus={aiStatus}
-          interpretation={displayInterpretation}
+          aiInterpretation={aiInterpretation}
+          castingResult={session.castingResult}
           tosses={session.tosses}
           onReset={session.reset}
         />

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildCasting, createCoinToss } from '../domain/coinToss';
-import { createInterpretation } from '../domain/interpretation';
+import { createCastingResult } from '../domain/interpretation';
 import { createAiInterpretation } from './openaiReading';
 
-function makeInterpretation() {
+function makeCastingResult() {
   const casting = buildCasting('今日运势', 'general', [
     createCoinToss(['heads', 'tails', 'tails']),
     createCoinToss(['heads', 'tails', 'tails']),
@@ -15,13 +15,13 @@ function makeInterpretation() {
 
   return {
     tosses: casting.tosses,
-    interpretation: createInterpretation(casting)
+    castingResult: createCastingResult(casting)
   };
 }
 
 describe('createAiInterpretation', () => {
   it('requests an OpenAI Chat Completions reading and preserves the traditional basis', async () => {
-    const { interpretation, tosses } = makeInterpretation();
+    const { castingResult, tosses } = makeCastingResult();
     const fetchCalls: Array<[RequestInfo | URL, RequestInit?]> = [];
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       fetchCalls.push([input, init]);
@@ -45,7 +45,7 @@ describe('createAiInterpretation', () => {
       };
     });
 
-    const result = await createAiInterpretation(interpretation, tosses, {
+    const result = await createAiInterpretation(castingResult, tosses, {
       apiKey: 'sk-user',
       apiUrl: 'https://gateway.example/openai/chat/completions',
       model: 'gpt-4o-mini',
@@ -72,14 +72,14 @@ describe('createAiInterpretation', () => {
     expect(result.headline).toBe('AI：夬卦重在明断');
     expect(result.plainText).toContain('问题到了需要表态的时候');
     expect(result.advice).toEqual(['先确认边界', '避免情绪化推进', '保留复盘时间']);
-    expect(result.originalHexagram).toBe(interpretation.originalHexagram);
-    expect(result.changedHexagram).toBe(interpretation.changedHexagram);
-    expect(result.movingLines).toBe(interpretation.movingLines);
-    expect(result.basis).toBe(interpretation.basis);
+    expect(result.originalHexagram).toBe(castingResult.originalHexagram);
+    expect(result.changedHexagram).toBe(castingResult.changedHexagram);
+    expect(result.movingLines).toBe(castingResult.movingLines);
+    expect(result.basis).toBe(castingResult.basis);
   });
 
   it('requests an Anthropic Messages reading with the selected URL and provider headers', async () => {
-    const { interpretation, tosses } = makeInterpretation();
+    const { castingResult, tosses } = makeCastingResult();
     const fetchCalls: Array<[RequestInfo | URL, RequestInit?]> = [];
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       fetchCalls.push([input, init]);
@@ -102,7 +102,7 @@ describe('createAiInterpretation', () => {
       };
     });
 
-    const result = await createAiInterpretation(interpretation, tosses, {
+    const result = await createAiInterpretation(castingResult, tosses, {
       apiKey: 'sk-ant-user',
       apiUrl: 'https://gateway.example/anthropic/v1/messages',
       model: 'claude-sonnet-4-6',
@@ -129,11 +129,11 @@ describe('createAiInterpretation', () => {
       expect.objectContaining({ role: 'user', content: expect.stringContaining('今日运势') })
     ]);
     expect(result.headline).toBe('Claude：以夬为断');
-    expect(result.basis).toBe(interpretation.basis);
+    expect(result.basis).toBe(castingResult.basis);
   });
 
   it('accepts an OpenAI base URL and appends the Chat Completions path', async () => {
-    const { interpretation, tosses } = makeInterpretation();
+    const { castingResult, tosses } = makeCastingResult();
     const fetcher = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -153,7 +153,7 @@ describe('createAiInterpretation', () => {
       text: async () => ''
     }));
 
-    await createAiInterpretation(interpretation, tosses, {
+    await createAiInterpretation(castingResult, tosses, {
       apiKey: 'sk-user',
       apiUrl: 'https://api.openai.com',
       model: 'gpt-4o-mini',
@@ -168,7 +168,7 @@ describe('createAiInterpretation', () => {
   });
 
   it('accepts an Anthropic base URL and appends the Messages path', async () => {
-    const { interpretation, tosses } = makeInterpretation();
+    const { castingResult, tosses } = makeCastingResult();
     const fetcher = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -187,7 +187,7 @@ describe('createAiInterpretation', () => {
       text: async () => ''
     }));
 
-    await createAiInterpretation(interpretation, tosses, {
+    await createAiInterpretation(castingResult, tosses, {
       apiKey: 'sk-ant-user',
       apiUrl: 'https://api.anthropic.com',
       model: 'claude-sonnet-4-6',
@@ -202,7 +202,7 @@ describe('createAiInterpretation', () => {
   });
 
   it('accepts a DeepSeek base URL and appends the OpenAI-compatible path', async () => {
-    const { interpretation, tosses } = makeInterpretation();
+    const { castingResult, tosses } = makeCastingResult();
     const fetchCalls: Array<[RequestInfo | URL, RequestInit?]> = [];
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       fetchCalls.push([input, init]);
@@ -226,7 +226,7 @@ describe('createAiInterpretation', () => {
       };
     });
 
-    await createAiInterpretation(interpretation, tosses, {
+    await createAiInterpretation(castingResult, tosses, {
       apiKey: 'sk-deepseek-user',
       apiUrl: 'https://api.deepseek.com',
       model: 'deepseek-v4-flash',
@@ -245,11 +245,11 @@ describe('createAiInterpretation', () => {
   });
 
   it('rejects empty user keys before sending a request', async () => {
-    const { interpretation, tosses } = makeInterpretation();
+    const { castingResult, tosses } = makeCastingResult();
     const fetcher = vi.fn();
 
     await expect(
-      createAiInterpretation(interpretation, tosses, {
+      createAiInterpretation(castingResult, tosses, {
         apiKey: '   ',
         apiUrl: 'https://api.openai.com/v1/chat/completions',
         model: 'gpt-4o-mini',
@@ -261,11 +261,11 @@ describe('createAiInterpretation', () => {
   });
 
   it('surfaces non-JSON provider errors without rereading the response body', async () => {
-    const { interpretation, tosses } = makeInterpretation();
+    const { castingResult, tosses } = makeCastingResult();
     const fetcher = vi.fn(async () => new Response('proxy upstream denied', { status: 502 }));
 
     await expect(
-      createAiInterpretation(interpretation, tosses, {
+      createAiInterpretation(castingResult, tosses, {
         apiKey: 'sk-user',
         apiUrl: 'https://gateway.example/openai/chat/completions',
         model: 'gpt-4o-mini',

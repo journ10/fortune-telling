@@ -1,4 +1,4 @@
-import type { CoinToss, Interpretation } from '../domain/types';
+import type { AiInterpretation, CastingResult, CoinToss } from '../domain/types';
 import type { AiProvider } from './aiSettings';
 
 export const DEFAULT_AI_MODELS: Record<AiProvider, string> = {
@@ -55,10 +55,10 @@ interface AnthropicMessagesBody {
 }
 
 export async function createAiInterpretation(
-  interpretation: Interpretation,
+  castingResult: CastingResult,
   tosses: readonly CoinToss[],
   options: AiReadingOptions
-): Promise<Interpretation> {
+): Promise<AiInterpretation> {
   const provider = options.provider;
   const apiKey = options.apiKey.trim();
   const model = options.model.trim() || DEFAULT_AI_MODELS[provider];
@@ -71,7 +71,7 @@ export async function createAiInterpretation(
   const fetcher = options.fetcher ?? fetch;
   const response = await fetcher(
     apiUrl,
-    buildProviderRequest(provider, apiKey, model, interpretation, tosses, options.signal)
+    buildProviderRequest(provider, apiKey, model, castingResult, tosses, options.signal)
   );
 
   if (!response.ok) {
@@ -83,7 +83,7 @@ export async function createAiInterpretation(
   const patch = parseAiReadingPatch(text);
 
   return {
-    ...interpretation,
+    ...castingResult,
     headline: patch.headline,
     plainText: patch.plainText,
     advice: patch.advice
@@ -128,7 +128,7 @@ function buildProviderRequest(
   provider: AiProvider,
   apiKey: string,
   model: string,
-  interpretation: Interpretation,
+  castingResult: CastingResult,
   tosses: readonly CoinToss[],
   signal?: AbortSignal
 ): RequestInit {
@@ -148,7 +148,7 @@ function buildProviderRequest(
         messages: [
           {
             role: 'user',
-            content: JSON.stringify(buildPromptPayload(interpretation, tosses))
+            content: JSON.stringify(buildPromptPayload(castingResult, tosses))
           }
         ]
       })
@@ -171,7 +171,7 @@ function buildProviderRequest(
         },
         {
           role: 'user',
-          content: JSON.stringify(buildPromptPayload(interpretation, tosses))
+          content: JSON.stringify(buildPromptPayload(castingResult, tosses))
         }
       ],
       response_format: { type: 'json_object' }
@@ -190,33 +190,33 @@ function buildInstructions(): string {
   ].join('\n');
 }
 
-function buildPromptPayload(interpretation: Interpretation, tosses: readonly CoinToss[]) {
+function buildPromptPayload(castingResult: CastingResult, tosses: readonly CoinToss[]) {
   return {
-    question: interpretation.question,
-    questionType: interpretation.questionType,
+    question: castingResult.question,
+    questionType: castingResult.questionType,
     originalHexagram: {
-      name: interpretation.originalHexagram.name,
-      judgment: interpretation.originalHexagram.judgment,
-      image: interpretation.originalHexagram.image,
-      keywords: interpretation.originalHexagram.keywords,
-      summary: interpretation.originalHexagram.summary
+      name: castingResult.originalHexagram.name,
+      judgment: castingResult.originalHexagram.judgment,
+      image: castingResult.originalHexagram.image,
+      keywords: castingResult.originalHexagram.keywords,
+      summary: castingResult.originalHexagram.summary
     },
-    movingLines: interpretation.movingLines.map((line) => ({
+    movingLines: castingResult.movingLines.map((line) => ({
       title: line.title,
       original: line.original,
       summary: line.summary,
       tags: line.tags
     })),
-    changedHexagram: interpretation.changedHexagram
+    changedHexagram: castingResult.changedHexagram
       ? {
-          name: interpretation.changedHexagram.name,
-          judgment: interpretation.changedHexagram.judgment,
-          image: interpretation.changedHexagram.image,
-          keywords: interpretation.changedHexagram.keywords,
-          summary: interpretation.changedHexagram.summary
+          name: castingResult.changedHexagram.name,
+          judgment: castingResult.changedHexagram.judgment,
+          image: castingResult.changedHexagram.image,
+          keywords: castingResult.changedHexagram.keywords,
+          summary: castingResult.changedHexagram.summary
         }
       : null,
-    traditionalBasis: interpretation.basis,
+    traditionalBasis: castingResult.basis,
     tosses: tosses.map((toss, index) => ({
       throw: index + 1,
       faces: toss.faces,

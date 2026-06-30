@@ -56,14 +56,17 @@ export interface HexagramCatalogEntry extends HexagramRef {
   lines: HexagramLineText[];
 }
 
-export interface Interpretation {
+export interface CastingResult {
   question: string;
   questionType: QuestionType;
   originalHexagram: HexagramCatalogEntry;
   changedHexagram: HexagramCatalogEntry | null;
   movingLines: HexagramLineText[];
+  basis: string[];
+}
+
+export interface AiInterpretation extends CastingResult {
   headline: string;
   plainText: string;
   advice: string[];
-  basis: string[];
 }

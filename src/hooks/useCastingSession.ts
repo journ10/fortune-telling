@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useReducer } from 'react';
 import { buildCasting, tossCoins, tossCoinsWithBits } from '../domain/coinToss';
-import { createInterpretation } from '../domain/interpretation';
-import type { CoinToss, Interpretation, QuestionType } from '../domain/types';
+import { createCastingResult } from '../domain/interpretation';
+import type { CastingResult, CoinToss, QuestionType } from '../domain/types';
 
 export type AppPhase = 'question' | 'casting' | 'result';
 
@@ -10,7 +10,7 @@ export interface CastingSession {
   question: string;
   questionType: QuestionType;
   tosses: CoinToss[];
-  interpretation: Interpretation | null;
+  castingResult: CastingResult | null;
   currentThrow: number;
   start: (question: string, questionType: QuestionType) => void;
   addRandomToss: () => void;
@@ -23,7 +23,7 @@ interface CastingSessionState {
   question: string;
   questionType: QuestionType;
   tosses: CoinToss[];
-  interpretation: Interpretation | null;
+  castingResult: CastingResult | null;
 }
 
 type CastingSessionAction =
@@ -36,7 +36,7 @@ const initialState: CastingSessionState = {
   question: '',
   questionType: 'general',
   tosses: [],
-  interpretation: null
+  castingResult: null
 };
 
 function castingSessionReducer(
@@ -50,7 +50,7 @@ function castingSessionReducer(
         question: action.question.trim(),
         questionType: action.questionType,
         tosses: [],
-        interpretation: null
+        castingResult: null
       };
 
     case 'addToss': {
@@ -73,7 +73,7 @@ function castingSessionReducer(
         ...state,
         phase: 'result',
         tosses,
-        interpretation: createInterpretation(casting)
+        castingResult: createCastingResult(casting)
       };
     }
 
@@ -107,7 +107,7 @@ export function useCastingSession(): CastingSession {
       question: state.question,
       questionType: state.questionType,
       tosses: state.tosses,
-      interpretation: state.interpretation,
+      castingResult: state.castingResult,
       currentThrow: Math.min(state.tosses.length + 1, 6),
       start,
       addRandomToss,

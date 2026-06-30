@@ -27,7 +27,7 @@ describe('App', () => {
     });
   });
 
-  it('lets a user choose a quick question and complete six manual tosses', async () => {
+  it('requires AI settings before casting starts', async () => {
     const user = userEvent.setup();
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
@@ -37,25 +37,10 @@ describe('App', () => {
     expect(screen.getByRole('textbox', { name: '所问之事' })).toHaveValue('最近事业怎么推进？');
 
     await user.click(screen.getByRole('button', { name: '今日运势' }));
-    await user.click(screen.getByRole('button', { name: '开始起卦' }));
+    expect(screen.getByRole('button', { name: '配置 AI 后起卦' })).toBeDisabled();
+    expect(screen.getByText(/AI 解卦为必填/)).toBeInTheDocument();
 
-    expect(screen.getByText(/MediaPipe CDN/)).toBeInTheDocument();
-
-    for (let index = 0; index < 6; index += 1) {
-      await user.click(screen.getByRole('button', { name: '手动掷一次' }));
-
-      if (index === 0) {
-        expect(screen.getByRole('list', { name: '六爻' })).toBeInTheDocument();
-        expect(screen.getAllByRole('listitem')).toHaveLength(1);
-      }
-    }
-
-    expect(await screen.findByRole('heading', { name: /卦象结果/ })).toBeInTheDocument();
-    expect(screen.getByText('今日运势')).toBeInTheDocument();
-    expect(screen.getByText(/传统依据/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: '重新起卦' }));
-    expect(screen.getByRole('heading', { name: '三钱成卦' })).toBeInTheDocument();
+    expect(screen.queryByText(/MediaPipe CDN/)).not.toBeInTheDocument();
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -206,5 +191,32 @@ describe('App', () => {
       })
     );
     expect(request.messages[0]).toEqual(expect.objectContaining({ role: 'system' }));
+  });
+
+  it('does not fall back to a local reading when AI interpretation fails', async () => {
+    const user = userEvent.setup();
+    const fetcher = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+      text: async () => JSON.stringify({ error: { message: 'model not found' } })
+    }));
+    vi.stubGlobal('fetch', fetcher);
+    render(<App />);
+
+    await user.type(screen.getByLabelText('API Key'), 'sk-user');
+    await user.click(screen.getByRole('button', { name: '今日运势' }));
+    await user.click(screen.getByRole('button', { name: '开始起卦' }));
+
+    for (let index = 0; index < 6; index += 1) {
+      await user.click(screen.getByRole('button', { name: '手动掷一次' }));
+    }
+
+    expect(await screen.findByText('AI 解卦失败：model not found')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /卦象结果/ })).toBeInTheDocument();
+    expect(screen.getByText('传统依据')).toBeInTheDocument();
+    expect(screen.queryByText('白话解读')).not.toBeInTheDocument();
+    expect(screen.queryByText('行动建议')).not.toBeInTheDocument();
+    expect(screen.queryByText(/已回退/)).not.toBeInTheDocument();
   });
 });

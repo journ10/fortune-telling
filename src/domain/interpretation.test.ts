@@ -1,8 +1,8 @@
 import { buildCasting, createCoinToss } from './coinToss';
-import { createInterpretation } from './interpretation';
+import { createCastingResult } from './interpretation';
 
-describe('interpretation engine', () => {
-  it('creates a traceable result for a casting with moving lines', () => {
+describe('casting result engine', () => {
+  it('creates traceable hexagram facts for a casting with moving lines', () => {
     const casting = buildCasting('最近事业怎么推进？', 'career', [
       createCoinToss(['heads', 'tails', 'tails']),
       createCoinToss(['heads', 'heads', 'heads']),
@@ -12,7 +12,7 @@ describe('interpretation engine', () => {
       createCoinToss(['heads', 'tails', 'tails'])
     ]);
 
-    const result = createInterpretation(casting);
+    const result = createCastingResult(casting);
 
     expect(result.question).toBe('最近事业怎么推进？');
     expect(result.originalHexagram).toMatchObject({ id: 1, name: '乾为天' });
@@ -25,11 +25,9 @@ describe('interpretation engine', () => {
         tags: ['守中', '阳爻']
       })
     ]);
-    expect(result.headline).toBe('事业宜稳中推进：创造、主动，局势有变化点');
-    expect(result.plainText).toContain('本卦');
-    expect(result.plainText).toContain('动爻');
-    expect(result.plainText).toContain('变卦');
-    expect(result.advice).toContain('动爻提示守住中线，先校准关系、资源和承诺。');
+    expect('headline' in result).toBe(false);
+    expect('plainText' in result).toBe(false);
+    expect('advice' in result).toBe(false);
     expect(result.basis).toEqual(
       expect.arrayContaining([
         expect.stringContaining('卦辞'),
@@ -49,14 +47,14 @@ describe('interpretation engine', () => {
       createCoinToss(['heads', 'tails', 'tails'])
     ]);
 
-    const result = createInterpretation(casting);
+    const result = createCastingResult(casting);
 
     expect(result.changedHexagram).toBeNull();
     expect(result.movingLines).toEqual([]);
-    expect(result.plainText).toContain('本卦无动爻');
+    expect(result.basis).toContain('本卦无动爻：不另取变卦');
   });
 
-  it('changes tag-derived advice when a different line moves', () => {
+  it('keeps moving-line tags so AI can distinguish different moving lines', () => {
     const secondLineMoving = buildCasting('最近事业怎么推进？', 'career', [
       createCoinToss(['heads', 'tails', 'tails']),
       createCoinToss(['heads', 'heads', 'heads']),
@@ -74,11 +72,11 @@ describe('interpretation engine', () => {
       createCoinToss(['heads', 'tails', 'tails'])
     ]);
 
-    const secondLineAdvice = createInterpretation(secondLineMoving).advice[1];
-    const thirdLineAdvice = createInterpretation(thirdLineMoving).advice[1];
+    const secondLineTags = createCastingResult(secondLineMoving).movingLines[0].tags;
+    const thirdLineTags = createCastingResult(thirdLineMoving).movingLines[0].tags;
 
-    expect(secondLineAdvice).toBe('动爻提示守住中线，先校准关系、资源和承诺。');
-    expect(thirdLineAdvice).toBe('动爻提示正处转折，先确认事实变化再调整方向。');
-    expect(secondLineAdvice).not.toBe(thirdLineAdvice);
+    expect(secondLineTags).toContain('守中');
+    expect(thirdLineTags).toContain('转折');
+    expect(secondLineTags).not.toEqual(thirdLineTags);
   });
 });

@@ -17,7 +17,7 @@ describe('useCastingSession', () => {
 
     expect(result.current.phase).toBe('result');
     expect(result.current.tosses).toHaveLength(6);
-    expect(result.current.interpretation?.question).toBe('今日运势');
+    expect(result.current.castingResult?.question).toBe('今日运势');
   });
 
   it('resets to question entry', () => {
@@ -30,7 +30,7 @@ describe('useCastingSession', () => {
 
     expect(result.current.phase).toBe('question');
     expect(result.current.tosses).toEqual([]);
-    expect(result.current.interpretation).toBeNull();
+    expect(result.current.castingResult).toBeNull();
   });
 
   it('stores and interprets a trimmed question', () => {
@@ -48,8 +48,8 @@ describe('useCastingSession', () => {
       });
     }
 
-    expect(result.current.interpretation?.question).toBe('今日运势');
-    expect(result.current.interpretation?.questionType).toBe('career');
+    expect(result.current.castingResult?.question).toBe('今日运势');
+    expect(result.current.castingResult?.questionType).toBe('career');
   });
 
   it('uses the new question and type when start and tosses happen in one act', () => {
@@ -64,8 +64,8 @@ describe('useCastingSession', () => {
     });
 
     expect(result.current.phase).toBe('result');
-    expect(result.current.interpretation?.question).toBe('今日运势');
-    expect(result.current.interpretation?.questionType).toBe('relationship');
+    expect(result.current.castingResult?.question).toBe('今日运势');
+    expect(result.current.castingResult?.questionType).toBe('relationship');
   });
 
   it('ignores tosses before start and after reset', () => {
@@ -87,7 +87,7 @@ describe('useCastingSession', () => {
 
     expect(result.current.phase).toBe('question');
     expect(result.current.tosses).toEqual([]);
-    expect(result.current.interpretation).toBeNull();
+    expect(result.current.castingResult).toBeNull();
   });
 
   it('ignores a seventh toss', () => {
