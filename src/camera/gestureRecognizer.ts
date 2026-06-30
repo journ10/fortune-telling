@@ -29,24 +29,32 @@ const RECOGNIZED_GESTURES: ReadonlySet<string> = new Set<RecognizedGesture>([
   'ILoveYou'
 ]);
 
-export function createGestureGate(cooldownMs: number): GestureGate {
-  let previousGesture: RecognizedGesture = 'None';
+export function createGestureGate(cooldownMs: number, armWindowMs = 1200): GestureGate {
+  let armedUntil = Number.NEGATIVE_INFINITY;
   let lastTriggerAt = Number.NEGATIVE_INFINITY;
 
   return {
     update(gesture, timestamp) {
+      if (gesture === 'Closed_Fist') {
+        armedUntil = timestamp + armWindowMs;
+        return false;
+      }
+
       const shouldTrigger =
-        previousGesture === 'Closed_Fist' &&
         gesture === 'Open_Palm' &&
+        timestamp <= armedUntil &&
         timestamp - lastTriggerAt >= cooldownMs;
 
-      previousGesture = gesture;
-
       if (!shouldTrigger) {
+        if (gesture !== 'None') {
+          armedUntil = Number.NEGATIVE_INFINITY;
+        }
+
         return false;
       }
 
       lastTriggerAt = timestamp;
+      armedUntil = Number.NEGATIVE_INFINITY;
       return true;
     }
   };

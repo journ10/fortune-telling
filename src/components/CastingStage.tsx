@@ -31,7 +31,13 @@ const GESTURE_LABELS: Record<RecognizedGesture, string> = {
   ILoveYou: '已识别 I Love You 手势'
 };
 
-function getGestureInstruction(gesture: RecognizedGesture): string {
+const GESTURE_ARM_WINDOW_MS = 1200;
+
+function getGestureInstruction(gesture: RecognizedGesture, isArmed: boolean): string {
+  if (isArmed && gesture === 'None') {
+    return '握拳已就绪，请张开手掌完成一掷';
+  }
+
   if (gesture === 'Closed_Fist') {
     return '已识别握拳，请张开手掌完成一掷';
   }
@@ -53,9 +59,12 @@ export default function CastingStage({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const flashTimeoutRef = useRef<number | undefined>(undefined);
   const lastGestureRef = useRef<RecognizedGesture>('None');
+  const lastFistAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const gateArmedRef = useRef(false);
   const [cameraState, setCameraState] = useState('正在启动摄像头');
   const [flash, setFlash] = useState(false);
   const [lastGesture, setLastGesture] = useState<RecognizedGesture>('None');
+  const [gateArmed, setGateArmed] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -64,7 +73,7 @@ export default function CastingStage({
       return undefined;
     }
 
-    const gate = createGestureGate(1500);
+    const gate = createGestureGate(1500, GESTURE_ARM_WINDOW_MS);
     let animationFrame = 0;
     let active = true;
     let stream: MediaStream | undefined;
@@ -88,16 +97,30 @@ export default function CastingStage({
         return;
       }
 
-      const result = recognizer.recognizeForVideo(video, performance.now());
+      const timestamp = performance.now();
+      const result = recognizer.recognizeForVideo(video, timestamp);
       const gesture = getTopGesture(result);
+      const didRecognizeFist = gesture === 'Closed_Fist';
 
-      if (gesture !== lastGestureRef.current) {
-        lastGestureRef.current = gesture;
-        setLastGesture(gesture);
-        setCameraState(getGestureInstruction(gesture));
+      if (didRecognizeFist) {
+        lastFistAtRef.current = timestamp;
       }
 
-      if (gate.update(gesture, performance.now())) {
+      const triggered = gate.update(gesture, timestamp);
+      const nextGateArmed =
+        !triggered &&
+        timestamp - lastFistAtRef.current <= GESTURE_ARM_WINDOW_MS &&
+        (gesture === 'Closed_Fist' || gesture === 'None');
+
+      if (gesture !== lastGestureRef.current || nextGateArmed !== gateArmedRef.current) {
+        lastGestureRef.current = gesture;
+        gateArmedRef.current = nextGateArmed;
+        setLastGesture(gesture);
+        setGateArmed(nextGateArmed);
+        setCameraState(getGestureInstruction(gesture, nextGateArmed));
+      }
+
+      if (triggered) {
         pulse();
         setCameraState('已记一爻，请继续下一次');
         onManualToss();
@@ -175,7 +198,9 @@ export default function CastingStage({
             <span className="gestureCore">{currentThrow}</span>
           </span>
           <p className="cameraHint">{cameraState}</p>
-          <p className="gestureStatus">当前状态：{GESTURE_LABELS[lastGesture]}</p>
+          <p className="gestureStatus">
+            当前状态：{gateArmed && lastGesture === 'None' ? '握拳已就绪' : GESTURE_LABELS[lastGesture]}
+          </p>
         </div>
       </div>
 

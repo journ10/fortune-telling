@@ -33,6 +33,14 @@ describe('gesture gate', () => {
     expect(gate.update('Open_Palm', 1120)).toBe(false);
   });
 
+  it('allows brief neutral frames between fist and open palm', () => {
+    const gate = createGestureGate(1500);
+
+    expect(gate.update('Closed_Fist', 1000)).toBe(false);
+    expect(gate.update('None', 1060)).toBe(false);
+    expect(gate.update('Open_Palm', 1120)).toBe(true);
+  });
+
   it('allows a repeated trigger at the exact cooldown boundary', () => {
     const gate = createGestureGate(1500);
 
