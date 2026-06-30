@@ -59,7 +59,7 @@ describe('App', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('uses the user provided OpenAI key for a Chat Completions AI reading', async () => {
+  it('uses the user provided OpenAI settings for a Chat Completions AI reading', async () => {
     const user = userEvent.setup();
     const fetcher = vi.fn(async () => ({
       ok: true,
@@ -82,9 +82,12 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetcher);
     render(<App />);
 
-    await user.type(screen.getByLabelText('OpenAI API Key'), 'sk-user');
-    await user.clear(screen.getByLabelText('Chat Completions 模型'));
-    await user.type(screen.getByLabelText('Chat Completions 模型'), 'gpt-4o-mini');
+    expect(screen.getByLabelText('Provider')).toHaveValue('openai');
+    await user.clear(screen.getByLabelText('API URL'));
+    await user.type(screen.getByLabelText('API URL'), 'https://gateway.example/openai/chat/completions');
+    await user.type(screen.getByLabelText('API Key'), 'sk-user');
+    await user.clear(screen.getByLabelText('模型'));
+    await user.type(screen.getByLabelText('模型'), 'gpt-4o-mini');
     await user.click(screen.getByRole('button', { name: '今日运势' }));
     await user.click(screen.getByRole('button', { name: '开始起卦' }));
 
@@ -97,11 +100,57 @@ describe('App', () => {
     expect(localStorage.getItem('fortune-telling.aiSettings')).toBeNull();
 
     expect(fetcher).toHaveBeenCalledWith(
-      'https://api.openai.com/v1/chat/completions',
+      'https://gateway.example/openai/chat/completions',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
           Authorization: 'Bearer sk-user'
+        })
+      })
+    );
+  });
+
+  it('switches provider defaults and sends an Anthropic Messages request', async () => {
+    const user = userEvent.setup();
+    const fetcher = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              headline: 'Claude：变中求稳',
+              plainText: '这次解读保留传统依据，只把建议讲得更贴近问题。',
+              advice: ['先收束问题', '降低承诺', '复盘再推进']
+            })
+          }
+        ]
+      }),
+      text: async () => ''
+    }));
+    vi.stubGlobal('fetch', fetcher);
+    render(<App />);
+
+    await user.selectOptions(screen.getByLabelText('Provider'), 'anthropic');
+    expect(screen.getByLabelText('API URL')).toHaveValue('https://api.anthropic.com/v1/messages');
+    expect(screen.getByLabelText('模型')).toHaveValue('claude-sonnet-4-6');
+    await user.type(screen.getByLabelText('API Key'), 'sk-ant-user');
+    await user.click(screen.getByRole('button', { name: '今日运势' }));
+    await user.click(screen.getByRole('button', { name: '开始起卦' }));
+
+    for (let index = 0; index < 6; index += 1) {
+      await user.click(screen.getByRole('button', { name: '手动掷一次' }));
+    }
+
+    expect(await screen.findByRole('heading', { name: 'Claude：变中求稳' })).toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://api.anthropic.com/v1/messages',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'anthropic-version': '2023-06-01',
+          'x-api-key': 'sk-ant-user'
         })
       })
     );

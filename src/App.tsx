@@ -60,7 +60,9 @@ export default function App() {
 
     createAiInterpretation(session.interpretation, session.tosses, {
       apiKey,
+      apiUrl: aiSettings.apiUrl,
       model: aiSettings.model,
+      provider: aiSettings.provider,
       signal: controller.signal
     })
       .then((result) => {
@@ -91,7 +93,9 @@ export default function App() {
     };
   }, [
     aiSettings.apiKey,
+    aiSettings.apiUrl,
     aiSettings.model,
+    aiSettings.provider,
     session.interpretation,
     session.phase,
     session.tosses

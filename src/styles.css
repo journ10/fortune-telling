@@ -164,7 +164,7 @@ h1 {
 
 .aiSettingsGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(180px, 0.65fr);
+  grid-template-columns: minmax(160px, 0.6fr) minmax(0, 1.4fr);
   gap: 12px;
 }
 
@@ -177,7 +177,8 @@ h1 {
   font-weight: 700;
 }
 
-.aiField input {
+.aiField input,
+.aiField select {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
@@ -188,7 +189,12 @@ h1 {
   line-height: 1.4;
 }
 
-.aiField input:focus {
+.aiField select {
+  cursor: pointer;
+}
+
+.aiField input:focus,
+.aiField select:focus {
   outline: 2px solid rgba(215, 170, 97, 0.52);
   outline-offset: 2px;
 }

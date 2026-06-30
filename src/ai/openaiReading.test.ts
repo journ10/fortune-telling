@@ -47,12 +47,14 @@ describe('createAiInterpretation', () => {
 
     const result = await createAiInterpretation(interpretation, tosses, {
       apiKey: 'sk-user',
+      apiUrl: 'https://gateway.example/openai/chat/completions',
       model: 'gpt-4o-mini',
+      provider: 'openai',
       fetcher
     });
 
     expect(fetcher).toHaveBeenCalledWith(
-      'https://api.openai.com/v1/chat/completions',
+      'https://gateway.example/openai/chat/completions',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
@@ -76,6 +78,60 @@ describe('createAiInterpretation', () => {
     expect(result.basis).toBe(interpretation.basis);
   });
 
+  it('requests an Anthropic Messages reading with the selected URL and provider headers', async () => {
+    const { interpretation, tosses } = makeInterpretation();
+    const fetchCalls: Array<[RequestInfo | URL, RequestInit?]> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push([input, init]);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                headline: 'Claude：以夬为断',
+                plainText: '卦象强调先明辨，再行动。',
+                advice: ['说清立场', '保留证据', '不急于扩大冲突']
+              })
+            }
+          ]
+        }),
+        text: async () => ''
+      };
+    });
+
+    const result = await createAiInterpretation(interpretation, tosses, {
+      apiKey: 'sk-ant-user',
+      apiUrl: 'https://gateway.example/anthropic/v1/messages',
+      model: 'claude-sonnet-4-6',
+      provider: 'anthropic',
+      fetcher
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://gateway.example/anthropic/v1/messages',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          'x-api-key': 'sk-ant-user'
+        })
+      })
+    );
+    const request = JSON.parse(fetchCalls[0][1]?.body as string);
+    expect(request.model).toBe('claude-sonnet-4-6');
+    expect(request.max_tokens).toBe(1200);
+    expect(request.system).toContain('周易');
+    expect(request.messages).toEqual([
+      expect.objectContaining({ role: 'user', content: expect.stringContaining('今日运势') })
+    ]);
+    expect(result.headline).toBe('Claude：以夬为断');
+    expect(result.basis).toBe(interpretation.basis);
+  });
+
   it('rejects empty user keys before sending a request', async () => {
     const { interpretation, tosses } = makeInterpretation();
     const fetcher = vi.fn();
@@ -83,10 +139,12 @@ describe('createAiInterpretation', () => {
     await expect(
       createAiInterpretation(interpretation, tosses, {
         apiKey: '   ',
+        apiUrl: 'https://api.openai.com/v1/chat/completions',
         model: 'gpt-4o-mini',
+        provider: 'openai',
         fetcher
       })
-    ).rejects.toThrow('缺少 OpenAI API Key');
+    ).rejects.toThrow('缺少 AI API Key');
     expect(fetcher).not.toHaveBeenCalled();
   });
 });

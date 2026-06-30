@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { AiSettings } from '../ai/aiSettings';
+import { getDefaultProviderSettings, type AiProvider, type AiSettings } from '../ai/aiSettings';
 import type { QuestionType } from '../domain/types';
 
 const QUICK_QUESTIONS: Array<{ label: string; question: string; type: QuestionType }> = [
@@ -24,6 +24,14 @@ export default function QuestionEntry({
   const [question, setQuestion] = useState('');
   const [questionType, setQuestionType] = useState<QuestionType>('general');
   const trimmedQuestion = question.trim();
+  const updateProvider = (provider: AiProvider) => {
+    const providerDefaults = getDefaultProviderSettings(provider);
+    onAiSettingsChange({
+      ...aiSettings,
+      provider,
+      ...providerDefaults
+    });
+  };
 
   return (
     <section className="questionPanel" aria-labelledby="question-title">
@@ -67,18 +75,47 @@ export default function QuestionEntry({
       <section className="aiSettings" aria-labelledby="ai-settings-title">
         <div>
           <p className="eyebrow">可选 AI 解卦</p>
-          <h2 id="ai-settings-title">Chat Completions</h2>
+          <h2 id="ai-settings-title">AI Provider</h2>
           <p className="aiSettingsCopy">
-            使用你自己的 OpenAI API Key。Key 只保存在当前页面状态里，刷新后需要重新输入。
+            使用你自己的 API Key。Key 只保存在当前页面状态里，刷新后需要重新输入。
           </p>
         </div>
 
         <div className="aiSettingsGrid">
-          <label className="aiField" htmlFor="openai-api-key">
-            <span>OpenAI API Key</span>
+          <label className="aiField" htmlFor="ai-provider">
+            <span>Provider</span>
+            <select
+              id="ai-provider"
+              value={aiSettings.provider}
+              onChange={(event) => updateProvider(event.target.value as AiProvider)}
+            >
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </label>
+
+          <label className="aiField" htmlFor="ai-api-url">
+            <span>API URL</span>
             <input
               autoComplete="off"
-              id="openai-api-key"
+              id="ai-api-url"
+              spellCheck={false}
+              type="url"
+              value={aiSettings.apiUrl}
+              onChange={(event) =>
+                onAiSettingsChange({
+                  ...aiSettings,
+                  apiUrl: event.target.value
+                })
+              }
+            />
+          </label>
+
+          <label className="aiField" htmlFor="ai-api-key">
+            <span>API Key</span>
+            <input
+              autoComplete="off"
+              id="ai-api-key"
               spellCheck={false}
               type="password"
               value={aiSettings.apiKey}
@@ -92,11 +129,11 @@ export default function QuestionEntry({
             />
           </label>
 
-          <label className="aiField" htmlFor="openai-model">
-            <span>Chat Completions 模型</span>
+          <label className="aiField" htmlFor="ai-model">
+            <span>模型</span>
             <input
               autoComplete="off"
-              id="openai-model"
+              id="ai-model"
               spellCheck={false}
               type="text"
               value={aiSettings.model}

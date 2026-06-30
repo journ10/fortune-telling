@@ -1,8 +1,19 @@
 import type { CoinToss, Interpretation } from '../domain/types';
+import type { AiProvider } from './aiSettings';
 
-export const DEFAULT_AI_MODEL = 'gpt-5.5';
+export const DEFAULT_AI_MODELS: Record<AiProvider, string> = {
+  openai: 'gpt-5.5',
+  anthropic: 'claude-sonnet-4-6'
+};
+
+export const DEFAULT_AI_URLS: Record<AiProvider, string> = {
+  openai: 'https://api.openai.com/v1/chat/completions',
+  anthropic: 'https://api.anthropic.com/v1/messages'
+};
 
 interface AiReadingOptions {
+  provider: AiProvider;
+  apiUrl: string;
   apiKey: string;
   model: string;
   signal?: AbortSignal;
@@ -31,26 +42,90 @@ interface OpenAiChatCompletionBody {
   };
 }
 
+interface AnthropicMessagesBody {
+  content?: Array<{
+    type?: string;
+    text?: string;
+  }>;
+  error?: {
+    message?: string;
+  };
+}
+
 export async function createAiInterpretation(
   interpretation: Interpretation,
   tosses: readonly CoinToss[],
   options: AiReadingOptions
 ): Promise<Interpretation> {
+  const provider = options.provider;
   const apiKey = options.apiKey.trim();
-  const model = options.model.trim() || DEFAULT_AI_MODEL;
+  const model = options.model.trim() || DEFAULT_AI_MODELS[provider];
+  const apiUrl = options.apiUrl.trim() || DEFAULT_AI_URLS[provider];
 
   if (!apiKey) {
-    throw new Error('缺少 OpenAI API Key');
+    throw new Error('缺少 AI API Key');
   }
 
   const fetcher = options.fetcher ?? fetch;
-  const response = await fetcher('https://api.openai.com/v1/chat/completions', {
+  const response = await fetcher(
+    apiUrl,
+    buildProviderRequest(provider, apiKey, model, interpretation, tosses, options.signal)
+  );
+
+  if (!response.ok) {
+    throw new Error(await readProviderError(response));
+  }
+
+  const body = await response.json();
+  const text = extractResponseText(provider, body);
+  const patch = parseAiReadingPatch(text);
+
+  return {
+    ...interpretation,
+    headline: patch.headline,
+    plainText: patch.plainText,
+    advice: patch.advice
+  };
+}
+
+function buildProviderRequest(
+  provider: AiProvider,
+  apiKey: string,
+  model: string,
+  interpretation: Interpretation,
+  tosses: readonly CoinToss[],
+  signal?: AbortSignal
+): RequestInit {
+  if (provider === 'anthropic') {
+    return {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
+        'x-api-key': apiKey
+      },
+      signal,
+      body: JSON.stringify({
+        model,
+        max_tokens: 1200,
+        system: buildInstructions(),
+        messages: [
+          {
+            role: 'user',
+            content: JSON.stringify(buildPromptPayload(interpretation, tosses))
+          }
+        ]
+      })
+    };
+  }
+
+  return {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`
     },
-    signal: options.signal,
+    signal,
     body: JSON.stringify({
       model,
       messages: [
@@ -65,21 +140,6 @@ export async function createAiInterpretation(
       ],
       response_format: { type: 'json_object' }
     })
-  });
-
-  if (!response.ok) {
-    throw new Error(await readOpenAiError(response));
-  }
-
-  const body = (await response.json()) as OpenAiChatCompletionBody;
-  const text = extractResponseText(body);
-  const patch = parseAiReadingPatch(text);
-
-  return {
-    ...interpretation,
-    headline: patch.headline,
-    plainText: patch.plainText,
-    advice: patch.advice
   };
 }
 
@@ -130,8 +190,23 @@ function buildPromptPayload(interpretation: Interpretation, tosses: readonly Coi
   };
 }
 
-function extractResponseText(body: OpenAiChatCompletionBody): string {
-  const text = body.choices?.[0]?.message?.content;
+function extractResponseText(provider: AiProvider, body: unknown): string {
+  if (provider === 'anthropic') {
+    const anthropicBody = body as AnthropicMessagesBody;
+    const text = anthropicBody.content
+      ?.filter((content) => content.type === 'text' && content.text)
+      .map((content) => content.text)
+      .join('\n');
+
+    if (text?.trim()) {
+      return text;
+    }
+
+    throw new Error('AI 没有返回可读取的文本');
+  }
+
+  const openAiBody = body as OpenAiChatCompletionBody;
+  const text = openAiBody.choices?.[0]?.message?.content;
   if (text?.trim()) {
     return text;
   }
@@ -157,9 +232,9 @@ function parseAiReadingPatch(text: string): AiReadingPatch {
   };
 }
 
-async function readOpenAiError(response: Pick<Response, 'status' | 'json' | 'text'>): Promise<string> {
+async function readProviderError(response: Pick<Response, 'status' | 'json' | 'text'>): Promise<string> {
   try {
-    const body = (await response.json()) as OpenAiChatCompletionBody;
+    const body = (await response.json()) as OpenAiChatCompletionBody | AnthropicMessagesBody;
     return body.error?.message ?? `AI 请求失败，状态码 ${response.status}`;
   } catch {
     const text = await response.text();
