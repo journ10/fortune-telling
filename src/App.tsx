@@ -38,7 +38,7 @@ export default function App() {
           currentThrow={session.currentThrow}
           tosses={session.tosses}
           lines={displayLines}
-          onManualToss={() => session.addRandomToss()}
+          onManualToss={session.addRandomToss}
         />
       ) : null}
       {session.phase === 'result' && session.interpretation ? (

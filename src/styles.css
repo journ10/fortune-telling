@@ -152,18 +152,45 @@ h1 {
   line-height: 1.7;
 }
 
-.cameraMock {
-  display: grid;
-  place-items: center;
+.cameraFrame {
+  position: relative;
+  overflow: hidden;
   width: min(560px, 100%);
-  min-height: 180px;
+  aspect-ratio: 16 / 9;
   margin: 0 0 22px;
-  border: 1px dashed rgba(215, 170, 97, 0.5);
+  border: 1px solid rgba(215, 170, 97, 0.44);
   border-radius: 8px;
-  color: #f1d7a6;
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
-    rgba(0, 0, 0, 0.18);
+  background: #0b0908;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.cameraFrameActive {
+  border-color: #f1d7a6;
+  box-shadow:
+    0 0 0 3px rgba(215, 170, 97, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.cameraVideo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.cameraHint {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #f6efe0;
+  background: rgba(18, 13, 10, 0.72);
+  font-size: 0.9375rem;
+  line-height: 1.45;
 }
 
 .coinTray {
@@ -334,7 +361,14 @@ h1 {
     grid-template-columns: 1fr;
   }
 
-  .cameraMock {
-    min-height: 148px;
+  .cameraFrame {
+    width: 100%;
+  }
+
+  .cameraHint {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    font-size: 0.875rem;
   }
 }
