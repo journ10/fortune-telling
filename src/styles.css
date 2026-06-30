@@ -248,6 +248,77 @@ h1 {
   flex: 1;
 }
 
+.resultPanel .readingBlock {
+  width: min(760px, 100%);
+  margin: 0 0 24px;
+  padding: 20px;
+  border: 1px solid rgba(216, 204, 186, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.resultPanel .readingBlock h2 {
+  margin: 0 0 14px;
+  color: #f1d7a6;
+  font-size: 1.25rem;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.resultPanel .readingBlock p,
+.resultPanel .readingBlock li {
+  color: #d8ccba;
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+.resultPanel .readingBlock p {
+  margin: 0 0 12px;
+}
+
+.resultPanel .readingBlock p:last-child {
+  margin-bottom: 0;
+}
+
+.resultPanel .readingBlock ul,
+.resultPanel .readingBlock ol {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+.resultPanel .resultFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.resultPanel .resultFacts div {
+  min-width: 0;
+  padding: 14px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.resultPanel .resultFacts dt {
+  margin: 0 0 6px;
+  color: #d7aa61;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.resultPanel .resultFacts dd {
+  margin: 0;
+  color: #f6efe0;
+  font-size: 1.0625rem;
+  line-height: 1.45;
+}
+
+.resultPanel .tossList {
+  display: grid;
+  gap: 8px;
+}
+
 @media (max-width: 560px) {
   .appShell {
     padding: 18px;
