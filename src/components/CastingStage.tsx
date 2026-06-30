@@ -3,6 +3,7 @@ import {
   createGestureGate,
   createMediaPipeRecognizer,
   getTopGesture,
+  type RecognizedGesture,
   startCamera,
   stopCamera
 } from '../camera/gestureRecognizer';
@@ -19,6 +20,29 @@ interface CastingStageProps {
   onManualToss: () => void;
 }
 
+const GESTURE_LABELS: Record<RecognizedGesture, string> = {
+  None: '未检测到手势',
+  Closed_Fist: '已识别握拳',
+  Open_Palm: '已识别张掌',
+  Pointing_Up: '已识别指向',
+  Thumb_Down: '已识别拇指向下',
+  Thumb_Up: '已识别拇指向上',
+  Victory: '已识别胜利手势',
+  ILoveYou: '已识别 I Love You 手势'
+};
+
+function getGestureInstruction(gesture: RecognizedGesture): string {
+  if (gesture === 'Closed_Fist') {
+    return '已识别握拳，请张开手掌完成一掷';
+  }
+
+  if (gesture === 'Open_Palm') {
+    return '已识别张掌；若未记爻，请先握拳再张开';
+  }
+
+  return '请先握拳，再张开手掌完成一次掷钱';
+}
+
 export default function CastingStage({
   question,
   currentThrow,
@@ -28,8 +52,10 @@ export default function CastingStage({
 }: CastingStageProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const flashTimeoutRef = useRef<number | undefined>(undefined);
+  const lastGestureRef = useRef<RecognizedGesture>('None');
   const [cameraState, setCameraState] = useState('正在启动摄像头');
   const [flash, setFlash] = useState(false);
+  const [lastGesture, setLastGesture] = useState<RecognizedGesture>('None');
 
   useEffect(() => {
     const video = videoRef.current;
@@ -65,8 +91,15 @@ export default function CastingStage({
       const result = recognizer.recognizeForVideo(video, performance.now());
       const gesture = getTopGesture(result);
 
+      if (gesture !== lastGestureRef.current) {
+        lastGestureRef.current = gesture;
+        setLastGesture(gesture);
+        setCameraState(getGestureInstruction(gesture));
+      }
+
       if (gate.update(gesture, performance.now())) {
         pulse();
+        setCameraState('已记一爻，请继续下一次');
         onManualToss();
       }
 
@@ -89,7 +122,7 @@ export default function CastingStage({
           return;
         }
 
-        setCameraState('握拳后张开，完成一次掷钱');
+        setCameraState('请先握拳，再张开手掌完成一次掷钱');
         animationFrame = window.requestAnimationFrame(loop);
       } catch (error) {
         if (!active) {
@@ -135,9 +168,15 @@ export default function CastingStage({
       <h1 id="casting-title">第 {currentThrow} 掷 / 共 6 掷</h1>
       <p className="questionEcho">{question}</p>
 
-      <div className={flash ? 'cameraFrame cameraFrameActive' : 'cameraFrame'}>
-        <video ref={videoRef} className="cameraVideo" aria-label="摄像头预览" muted playsInline />
-        <p className="cameraHint">{cameraState}</p>
+      <div className={flash ? 'cameraFrame cameraFrameActive' : 'cameraFrame'} role="group" aria-label="手势识别区">
+        <video ref={videoRef} className="cameraVideo" muted playsInline aria-hidden="true" />
+        <div className="gestureScanner" aria-live="polite">
+          <span className="gestureRing" aria-hidden="true">
+            <span className="gestureCore">{currentThrow}</span>
+          </span>
+          <p className="cameraHint">{cameraState}</p>
+          <p className="gestureStatus">当前状态：{GESTURE_LABELS[lastGesture]}</p>
+        </div>
       </div>
 
       <CoinAnimation latestToss={tosses.at(-1)} />
