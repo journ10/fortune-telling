@@ -22,6 +22,7 @@ export default function HexagramLines({ lines }: HexagramLinesProps) {
               </>
             )}
           </span>
+          <span className="srOnly">{line.isYang ? '阳爻' : '阴爻'}</span>
           {line.isMoving ? <span className="movingMark">动</span> : null}
         </li>
       ))}

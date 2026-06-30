@@ -251,6 +251,18 @@ h1 {
   font-weight: 700;
 }
 
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 .yangLine,
 .yinLine {
   display: flex;
@@ -370,5 +382,44 @@ h1 {
     bottom: 10px;
     left: 10px;
     font-size: 0.875rem;
+  }
+}
+
+@media (min-width: 760px) {
+  .castingPanel {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+    gap: 24px;
+    align-items: start;
+  }
+
+  .castingPanel .eyebrow,
+  .castingPanel h1,
+  .castingPanel .questionEcho,
+  .castingPanel .privacyNotice {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 520px) {
+  .appShell {
+    padding: 16px;
+  }
+
+  h1 {
+    font-size: 2.45rem;
+  }
+
+  .coin {
+    width: 48px;
+  }
+
+  .quickGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .quickButton,
+  .primaryButton {
+    min-height: 46px;
   }
 }

@@ -25,5 +25,8 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: /卦象结果/ })).toBeInTheDocument();
     expect(screen.getByText('今日运势')).toBeInTheDocument();
     expect(screen.getByText(/传统依据/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '重新起卦' }));
+    expect(screen.getByRole('heading', { name: '三钱成卦' })).toBeInTheDocument();
   });
 });
