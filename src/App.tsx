@@ -8,8 +8,8 @@ import GestureControl from './components/GestureControl';
 import QuestionDialog from './components/QuestionDialog';
 import ResultDialog from './components/ResultDialog';
 import TabletopScene from './components/TabletopScene';
-import { tossCoins } from './domain/coinToss';
-import type { AiInterpretation, CoinToss, QuestionType } from './domain/types';
+import { createCoinToss } from './domain/coinToss';
+import type { AiInterpretation, CoinFace, QuestionType } from './domain/types';
 import { useCastingSession } from './hooks/useCastingSession';
 
 type ActiveDialog = 'ai-settings' | 'question' | 'result' | null;
@@ -26,16 +26,17 @@ export default function App() {
   const [submittedAiSettings, setSubmittedAiSettings] = useState(DEFAULT_AI_SETTINGS);
   const [aiInterpretation, setAiInterpretation] = useState<AiInterpretation | null>(null);
   const [aiStatus, setAiStatus] = useState<AiReadingStatus | null>(null);
-  const [pendingToss, setPendingToss] = useState<CoinToss | null>(null);
+  const [pendingTossId, setPendingTossId] = useState<number | null>(null);
   const [aiRequestNonce, setAiRequestNonce] = useState(0);
-  const pendingTossRef = useRef<CoinToss | null>(null);
+  const nextTossIdRef = useRef(1);
+  const pendingTossIdRef = useRef<number | null>(null);
   const isAiConfigured = hasCompleteAiSettings(aiSettings);
   const isSubmittedAiConfigured = hasCompleteAiSettings(submittedAiSettings);
   const resultAvailable = session.phase === 'result' && Boolean(session.castingResult);
 
   useEffect(() => {
-    pendingTossRef.current = pendingToss;
-  }, [pendingToss]);
+    pendingTossIdRef.current = pendingTossId;
+  }, [pendingTossId]);
 
   useEffect(() => {
     if (!isAiConfigured) {
@@ -150,8 +151,9 @@ export default function App() {
 
   const startCasting = useCallback(
     (question: string, questionType: QuestionType) => {
-      pendingTossRef.current = null;
-      setPendingToss(null);
+      pendingTossIdRef.current = null;
+      setPendingTossId(null);
+      nextTossIdRef.current = 1;
       setAiInterpretation(null);
       setAiStatus(null);
       setActiveDialog(null);
@@ -161,30 +163,32 @@ export default function App() {
   );
 
   const requestToss = useCallback(() => {
-    if (session.phase !== 'casting' || pendingTossRef.current) {
+    if (session.phase !== 'casting' || pendingTossIdRef.current !== null) {
       return;
     }
 
-    const toss = tossCoins();
-    pendingTossRef.current = toss;
-    setPendingToss(toss);
+    const tossId = nextTossIdRef.current;
+    nextTossIdRef.current += 1;
+    pendingTossIdRef.current = tossId;
+    setPendingTossId(tossId);
   }, [session.phase]);
 
-  const settleToss = useCallback(() => {
-    const toss = pendingTossRef.current;
+  const settleToss = useCallback((faces: [CoinFace, CoinFace, CoinFace]) => {
+    const pendingTossId = pendingTossIdRef.current;
 
-    if (!toss) {
+    if (pendingTossId === null) {
       return;
     }
 
-    pendingTossRef.current = null;
-    session.recordToss(toss);
-    setPendingToss(null);
+    pendingTossIdRef.current = null;
+    session.recordToss(createCoinToss(faces));
+    setPendingTossId(null);
   }, [session]);
 
   const resetCasting = useCallback(() => {
-    pendingTossRef.current = null;
-    setPendingToss(null);
+    pendingTossIdRef.current = null;
+    setPendingTossId(null);
+    nextTossIdRef.current = 1;
     setAiInterpretation(null);
     setAiStatus(null);
     setAiRequestNonce(0);
@@ -207,7 +211,7 @@ export default function App() {
     <main className="appShell">
       <TabletopScene
         currentThrow={session.currentThrow}
-        pendingToss={pendingToss}
+        pendingTossId={pendingTossId}
         resultAvailable={resultAvailable}
         onOpenResult={() => setActiveDialog('result')}
         onTossRequest={requestToss}
@@ -215,12 +219,12 @@ export default function App() {
       />
 
       {session.phase === 'casting' ? (
-        <CastProgressToast currentThrow={session.currentThrow} isAnimating={pendingToss !== null} />
+        <CastProgressToast currentThrow={session.currentThrow} isAnimating={pendingTossId !== null} />
       ) : null}
 
       <GestureControl
         isCasting={session.phase === 'casting'}
-        isTossing={pendingToss !== null}
+        isTossing={pendingTossId !== null}
         onGestureToss={requestToss}
       />
 

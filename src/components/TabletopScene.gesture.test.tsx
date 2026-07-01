@@ -19,7 +19,7 @@ describe('TabletopScene gesture trigger', () => {
     render(
       <TabletopScene
         currentThrow={1}
-        pendingToss={null}
+        pendingTossId={null}
         resultAvailable={false}
         onOpenResult={vi.fn()}
         onTossRequest={onTossRequest}

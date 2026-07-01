@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import * as coinTossModule from './domain/coinToss';
 
 const SETTLE_DELAY_MS = 1700;
 const SETTLED_HOLD_MS = 520;
@@ -139,6 +140,28 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('第 1 掷 / 共 6 掷');
     expect(screen.queryByText('AI Provider')).not.toBeInTheDocument();
+  });
+
+  it('waits for tabletop-settled faces instead of pre-generating a random toss', async () => {
+    const user = userEvent.setup();
+    const tossCoinsSpy = vi.spyOn(coinTossModule, 'tossCoins');
+    vi.stubGlobal('fetch', vi.fn());
+
+    render(<App />);
+
+    await saveAiSettings(user, { apiKey: 'sk-user' });
+    await startCastingWithDefaultQuestion(user);
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: '投掷铜钱' }));
+
+    expect(tossCoinsSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeDisabled();
+
+    await advanceTossSettlement();
+
+    expect(tossCoinsSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('第 2 掷 / 共 6 掷');
   });
 
   it('uses the user provided OpenAI settings for a Chat Completions AI reading', async () => {

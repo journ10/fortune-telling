@@ -1,15 +1,26 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import * as THREE from 'three';
-import type { CoinFace, CoinToss } from '../domain/types';
+import coinTextureUrl from '../assets/qing-cash-coin-texture.png';
+import type { CoinFace } from '../domain/types';
+import {
+  createCoinPhysicsSimulation,
+  initCoinPhysics,
+  type CoinPhysicsSimulation,
+  type CoinPhysicsSnapshot
+} from '../physics/coinPhysics';
+import {
+  TABLETOP_COIN_RADIUS,
+  TABLETOP_COIN_THICKNESS
+} from '../physics/coinGeometry';
 
 interface TabletopSceneProps {
   currentThrow: number;
-  pendingToss: CoinToss | null;
+  pendingTossId: number | null;
   resultAvailable: boolean;
   onOpenResult: () => void;
   onTossRequest: () => void;
-  onTossSettled: () => void;
+  onTossSettled: (faces: [CoinFace, CoinFace, CoinFace]) => void;
 }
 
 const FALLBACK_FACES: CoinFace[] = ['heads', 'tails', 'heads'];
@@ -18,8 +29,7 @@ const SETTLED_HOLD_MS = 520;
 const SETTLE_CALLBACK_DELAY_MS = SETTLE_DELAY_MS + SETTLED_HOLD_MS;
 const SCENE_WIDTH = 720;
 const SCENE_HEIGHT = 480;
-export const TABLETOP_COIN_RADIUS = 0.5;
-export const TABLETOP_COIN_THICKNESS = 0.082;
+export { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS };
 const COIN_RADIUS = TABLETOP_COIN_RADIUS;
 const COIN_THICKNESS = TABLETOP_COIN_THICKNESS;
 const COIN_FACE_TEXTURE_OFFSET = 0.02;
@@ -29,6 +39,7 @@ const COIN_SURFACE_EXTENSION = COIN_FACE_TEXTURE_OFFSET + COIN_RELIEF_GAP + COIN
 const TABLETOP_CONTACT_CLEARANCE = 0.006;
 const FACE_TEXTURE_SIZE = 512;
 export const MIN_COIN_LANDING_DISTANCE = TABLETOP_COIN_RADIUS * 2.08;
+export const COIN_TEXTURE_ASSET = coinTextureUrl;
 const COIN_LANDING_SEPARATION_MARGIN = 0.012;
 
 interface CoinAnimationPlan {
@@ -223,12 +234,27 @@ export function computeCoinTableContactY(rotation: THREE.Euler, tableY = 0): num
   return tableY + radialVerticalExtent + surfaceVerticalExtent + TABLETOP_CONTACT_CLEARANCE;
 }
 
-function createPendingTossKey(currentThrow: number, pendingToss: CoinToss | null): string | null {
-  if (!pendingToss) {
+function createPendingTossKey(currentThrow: number, pendingTossId: number | null): string | null {
+  if (pendingTossId === null) {
     return null;
   }
 
-  return `${currentThrow}:${pendingToss.faces.join('-')}:${pendingToss.score}:${pendingToss.line.name}`;
+  return `${currentThrow}:${pendingTossId}`;
+}
+
+function createFallbackTossFaces(
+  currentThrow: number,
+  pendingTossId: number
+): [CoinFace, CoinFace, CoinFace] {
+  const random = createSeededRandom(
+    Math.imul(currentThrow + 13, 1597334677) ^ Math.imul(pendingTossId + 41, 3812015801)
+  );
+
+  return [0, 1, 2].map(() => (random() > 0.5 ? 'heads' : 'tails')) as [
+    CoinFace,
+    CoinFace,
+    CoinFace
+  ];
 }
 
 function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
@@ -566,28 +592,20 @@ function createCoinFaceGeometry(): THREE.ShapeGeometry {
   return geometry;
 }
 
-interface ReliefStrokeSpec {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
+function createCoinSheetFaceTexture(face: CoinFace, sourceTexture: THREE.Texture): THREE.Texture {
+  const texture = sourceTexture.clone();
+  const cropSize = 860 / 2048;
+  const cropY = (1024 - 430) / 2048;
+  const cropX = face === 'heads' ? (512 - 430) / 2048 : (1536 - 430) / 2048;
+
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  texture.offset.set(cropX, cropY);
+  texture.repeat.set(cropSize, cropSize);
+  texture.needsUpdate = true;
+
+  return texture;
 }
-
-const HEADS_RELIEF_STROKES: ReliefStrokeSpec[] = [
-  { x: -0.036, y: 0.054, width: 0.13, height: 0.017, rotation: 0.03 },
-  { x: 0.026, y: 0.018, width: 0.018, height: 0.13, rotation: 0.02 },
-  { x: -0.042, y: -0.026, width: 0.102, height: 0.016, rotation: -0.12 },
-  { x: 0.05, y: -0.058, width: 0.018, height: 0.084, rotation: 0.26 },
-  { x: -0.034, y: -0.064, width: 0.074, height: 0.015, rotation: 0.18 }
-];
-
-const TAILS_RELIEF_STROKES: ReliefStrokeSpec[] = [
-  { x: 0, y: 0, width: 0.024, height: 0.27, rotation: 0.08 },
-  { x: -0.026, y: -0.098, width: 0.074, height: 0.017, rotation: -0.32 },
-  { x: 0.023, y: 0.006, width: 0.084, height: 0.017, rotation: 0.42 },
-  { x: -0.008, y: 0.112, width: 0.066, height: 0.016, rotation: -0.18 }
-];
 
 function createReliefMaterial(face: CoinFace, variant: number): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
@@ -666,39 +684,6 @@ function addSquareHoleRelief(
   ].forEach((mesh) => group.add(mesh));
 }
 
-function addReliefStrokeCluster(
-  group: THREE.Group,
-  anchorX: number,
-  anchorY: number,
-  clusterRotation: number,
-  scale: number,
-  outward: 1 | -1,
-  material: THREE.Material,
-  strokes: ReliefStrokeSpec[]
-): void {
-  const cosine = Math.cos(clusterRotation);
-  const sine = Math.sin(clusterRotation);
-
-  strokes.forEach((stroke) => {
-    const localX = stroke.x * scale;
-    const localY = stroke.y * scale;
-    const x = anchorX + localX * cosine - localY * sine;
-    const y = anchorY + localX * sine + localY * cosine;
-
-    group.add(
-      createReliefBar(
-        x,
-        y,
-        stroke.width * scale,
-        stroke.height * scale,
-        clusterRotation + stroke.rotation,
-        outward,
-        material
-      )
-    );
-  });
-}
-
 function addTraditionalCoinRelief(group: THREE.Group, variant: number): void {
   const headsMaterial = createReliefMaterial('heads', variant);
   const tailsMaterial = createReliefMaterial('tails', variant);
@@ -707,43 +692,9 @@ function addTraditionalCoinRelief(group: THREE.Group, variant: number): void {
   group.add(createReliefRing(0.43, 0.007, -1, tailsMaterial));
   addSquareHoleRelief(group, 1, headsMaterial);
   addSquareHoleRelief(group, -1, tailsMaterial);
-
-  [
-    { x: 0, y: 0.285, rotation: 0, scale: 1 },
-    { x: 0, y: -0.285, rotation: Math.PI, scale: 0.95 },
-    { x: 0.285, y: 0, rotation: -Math.PI / 2, scale: 0.96 },
-    { x: -0.285, y: 0, rotation: Math.PI / 2, scale: 0.96 }
-  ].forEach((cluster) => {
-    addReliefStrokeCluster(
-      group,
-      cluster.x,
-      cluster.y,
-      cluster.rotation,
-      cluster.scale,
-      1,
-      headsMaterial,
-      HEADS_RELIEF_STROKES
-    );
-  });
-
-  [
-    { x: -0.13, rotation: -0.08, scale: 1 },
-    { x: 0.13, rotation: 0.08, scale: 0.98 }
-  ].forEach((cluster) => {
-    addReliefStrokeCluster(
-      group,
-      cluster.x,
-      0,
-      cluster.rotation,
-      cluster.scale,
-      -1,
-      tailsMaterial,
-      TAILS_RELIEF_STROKES
-    );
-  });
 }
 
-export function createCoinGroup(variant: number): THREE.Group {
+export function createCoinGroup(variant: number, coinTexture?: THREE.Texture): THREE.Group {
   const group = new THREE.Group();
   const body = new THREE.Mesh(
     createCoinBodyGeometry(),
@@ -757,7 +708,9 @@ export function createCoinGroup(variant: number): THREE.Group {
     createCoinFaceGeometry(),
     new THREE.MeshStandardMaterial({
       depthWrite: false,
-      map: createCoinFaceTexture('heads', variant),
+      map: coinTexture
+        ? createCoinSheetFaceTexture('heads', coinTexture)
+        : createCoinFaceTexture('heads', variant),
       metalness: 0.66,
       polygonOffset: true,
       polygonOffsetFactor: -10,
@@ -771,7 +724,9 @@ export function createCoinGroup(variant: number): THREE.Group {
     createCoinFaceGeometry(),
     new THREE.MeshStandardMaterial({
       depthWrite: false,
-      map: createCoinFaceTexture('tails', variant),
+      map: coinTexture
+        ? createCoinSheetFaceTexture('tails', coinTexture)
+        : createCoinFaceTexture('tails', variant),
       metalness: 0.42,
       polygonOffset: true,
       polygonOffsetFactor: -10,
@@ -801,7 +756,7 @@ export function createCoinGroup(variant: number): THREE.Group {
 
 export default function TabletopScene({
   currentThrow,
-  pendingToss,
+  pendingTossId,
   resultAvailable,
   onOpenResult,
   onTossRequest,
@@ -812,17 +767,25 @@ export default function TabletopScene({
   const coinPlansRef = useRef<CoinAnimationPlan[]>(
     createCoinAnimationPlans(0, FALLBACK_FACES)
   );
+  const currentThrowRef = useRef(currentThrow);
   const tossStartedAtRef = useRef<number | null>(null);
+  const physicsSimulationRef = useRef<CoinPhysicsSimulation | null>(null);
+  const physicsTossKeyRef = useRef<string | null>(null);
+  const settlingHoldTimeoutRef = useRef<number | null>(null);
   const settledTossKeyRef = useRef<string | null>(null);
   const scheduledTossKeyRef = useRef<string | null>(null);
   const onTossSettledRef = useRef(onTossSettled);
   const [isWebGlActive, setIsWebGlActive] = useState(false);
   const throwStatusId = useId();
-  const pendingTossKey = createPendingTossKey(currentThrow, pendingToss);
+  const pendingTossKey = createPendingTossKey(currentThrow, pendingTossId);
 
   useEffect(() => {
     onTossSettledRef.current = onTossSettled;
   }, [onTossSettled]);
+
+  useEffect(() => {
+    currentThrowRef.current = currentThrow;
+  }, [currentThrow]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -833,18 +796,27 @@ export default function TabletopScene({
 
     let renderer: THREE.WebGLRenderer | null = null;
     let coinGroups: THREE.Group[] = [];
+    let coinTexture: THREE.Texture | null = null;
     let tabletopGeometry: THREE.PlaneGeometry | null = null;
     let tabletopMaterial: THREE.MeshStandardMaterial | null = null;
     let resizeObserver: ResizeObserver | null = null;
     let resizeRenderer: (() => void) | null = null;
     let isWindowResizeFallback = false;
     let animationFrame = 0;
+    let isEffectActive = true;
+    let isPhysicsReady = false;
 
     const cleanupWebGlResources = () => {
       if (animationFrame) {
         window.cancelAnimationFrame(animationFrame);
       }
 
+      if (settlingHoldTimeoutRef.current !== null) {
+        window.clearTimeout(settlingHoldTimeoutRef.current);
+        settlingHoldTimeoutRef.current = null;
+      }
+
+      isEffectActive = false;
       resizeObserver?.disconnect();
 
       if (isWindowResizeFallback && resizeRenderer) {
@@ -857,16 +829,30 @@ export default function TabletopScene({
 
       coinGroups.forEach(disposeObject3D);
       coinGroups = [];
+      coinTexture?.dispose();
       tabletopGeometry?.dispose();
 
       if (tabletopMaterial) {
         disposeMaterial(tabletopMaterial);
       }
 
+      physicsSimulationRef.current?.dispose();
+      physicsSimulationRef.current = null;
+      physicsTossKeyRef.current = null;
       renderer?.dispose();
     };
 
     try {
+      initCoinPhysics()
+        .then(() => {
+          if (isEffectActive) {
+            isPhysicsReady = true;
+          }
+        })
+        .catch(() => {
+          isPhysicsReady = false;
+        });
+
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x121611);
       const camera = new THREE.PerspectiveCamera(35, SCENE_WIDTH / SCENE_HEIGHT, 0.1, 100);
@@ -876,6 +862,9 @@ export default function TabletopScene({
         preserveDrawingBuffer: true
       });
       const activeTabletopGeometry = new THREE.PlaneGeometry(13, 9);
+      coinTexture = new THREE.TextureLoader().load(COIN_TEXTURE_ASSET);
+      coinTexture.colorSpace = THREE.SRGBColorSpace;
+      coinTexture.anisotropy = 4;
       tabletopGeometry = activeTabletopGeometry;
       const tabletopTexture = createTabletopTexture();
       tabletopTexture.wrapS = THREE.RepeatWrapping;
@@ -890,7 +879,7 @@ export default function TabletopScene({
       tabletopMaterial = activeTabletopMaterial;
       const tabletop = new THREE.Mesh(activeTabletopGeometry, activeTabletopMaterial);
       FALLBACK_FACES.forEach((face, index) => {
-        const coin = createCoinGroup(index);
+        const coin = createCoinGroup(index, coinTexture ?? undefined);
         const plan = coinPlansRef.current[index];
 
         coinGroups.push(coin);
@@ -961,16 +950,63 @@ export default function TabletopScene({
 
       const clock = new THREE.Clock();
       const renderFrame = () => {
-        const elapsed = clock.getElapsedTime();
+        const deltaSeconds = clock.getDelta();
+        const elapsed = clock.elapsedTime;
         const tossStartedAt = tossStartedAtRef.current;
         const tossProgress =
           tossStartedAt === null ? null : clamp((getTime() - tossStartedAt) / SETTLE_DELAY_MS);
+        const activeTossKey = scheduledTossKeyRef.current;
+        let physicsSnapshot: CoinPhysicsSnapshot | null = null;
+
+        if (tossProgress !== null && activeTossKey && isPhysicsReady) {
+          if (physicsTossKeyRef.current !== activeTossKey) {
+            physicsSimulationRef.current?.dispose();
+            physicsSimulationRef.current = createCoinPhysicsSimulation(
+              currentThrowRef.current,
+              Number(activeTossKey.split(':')[1] ?? 0)
+            );
+            physicsTossKeyRef.current = activeTossKey;
+          }
+
+          physicsSnapshot = physicsSimulationRef.current?.step(deltaSeconds) ?? null;
+
+          if (
+            physicsSnapshot?.settled &&
+            physicsSnapshot.faces &&
+            settledTossKeyRef.current !== activeTossKey &&
+            settlingHoldTimeoutRef.current === null
+          ) {
+            const settledFaces = physicsSnapshot.faces;
+            settledTossKeyRef.current = activeTossKey;
+            coinTargetsRef.current = settledFaces.map(targetRotationForFace);
+
+            settlingHoldTimeoutRef.current = window.setTimeout(() => {
+              settlingHoldTimeoutRef.current = null;
+
+              if (scheduledTossKeyRef.current !== activeTossKey) {
+                return;
+              }
+
+              tossStartedAtRef.current = null;
+              scheduledTossKeyRef.current = null;
+              physicsSimulationRef.current?.dispose();
+              physicsSimulationRef.current = null;
+              physicsTossKeyRef.current = null;
+              onTossSettledRef.current(settledFaces);
+            }, SETTLED_HOLD_MS);
+          }
+        }
 
         coinGroups.forEach((coin, index) => {
           const plan = coinPlansRef.current[index];
           const targetRotation = coinTargetsRef.current[index] ?? plan.finalRotationX;
 
-          if (tossProgress !== null) {
+          if (physicsSnapshot?.coins[index]) {
+            const simulatedCoin = physicsSnapshot.coins[index];
+
+            coin.position.copy(simulatedCoin.position);
+            coin.rotation.setFromQuaternion(simulatedCoin.visualRotation);
+          } else if (tossProgress !== null) {
             const descentProgress = clamp(tossProgress / 0.72);
             const impactProgress = clamp((tossProgress - 0.72) / 0.28);
             const slideProgress = smootherStep(impactProgress);
@@ -1037,10 +1073,17 @@ export default function TabletopScene({
   }, []);
 
   useEffect(() => {
-    if (!pendingTossKey || !pendingToss) {
+    if (!pendingTossKey || pendingTossId === null) {
       tossStartedAtRef.current = null;
       scheduledTossKeyRef.current = null;
       settledTossKeyRef.current = null;
+      physicsSimulationRef.current?.dispose();
+      physicsSimulationRef.current = null;
+      physicsTossKeyRef.current = null;
+      if (settlingHoldTimeoutRef.current !== null) {
+        window.clearTimeout(settlingHoldTimeoutRef.current);
+        settlingHoldTimeoutRef.current = null;
+      }
       coinTargetsRef.current = FALLBACK_FACES.map(targetRotationForFace);
       coinPlansRef.current = createCoinAnimationPlans(currentThrow, FALLBACK_FACES);
       return undefined;
@@ -1055,8 +1098,9 @@ export default function TabletopScene({
 
     scheduledTossKeyRef.current = pendingTossKey;
     tossStartedAtRef.current = getTime();
-    coinTargetsRef.current = pendingToss.faces.map(targetRotationForFace);
-    coinPlansRef.current = createCoinAnimationPlans(currentThrow, pendingToss.faces);
+    const fallbackFaces = createFallbackTossFaces(currentThrow, pendingTossId);
+    coinTargetsRef.current = fallbackFaces.map(targetRotationForFace);
+    coinPlansRef.current = createCoinAnimationPlans(currentThrow, fallbackFaces);
 
     const timeoutId = window.setTimeout(() => {
       if (
@@ -1069,7 +1113,10 @@ export default function TabletopScene({
       tossStartedAtRef.current = null;
       scheduledTossKeyRef.current = null;
       settledTossKeyRef.current = pendingTossKey;
-      onTossSettledRef.current();
+      physicsSimulationRef.current?.dispose();
+      physicsSimulationRef.current = null;
+      physicsTossKeyRef.current = null;
+      onTossSettledRef.current(fallbackFaces);
     }, SETTLE_CALLBACK_DELAY_MS);
 
     return () => {
@@ -1079,9 +1126,10 @@ export default function TabletopScene({
         scheduledTossKeyRef.current = null;
       }
     };
-  }, [pendingTossKey]);
+  }, [currentThrow, pendingTossId, pendingTossKey]);
 
-  const fallbackFaces = pendingToss?.faces ?? FALLBACK_FACES;
+  const fallbackFaces =
+    pendingTossId === null ? FALLBACK_FACES : createFallbackTossFaces(currentThrow, pendingTossId);
   const buttonLabel = resultAvailable ? '查看结果' : '投掷铜钱';
   const handleInteraction = () => {
     if (resultAvailable) {
@@ -1122,7 +1170,7 @@ export default function TabletopScene({
         aria-describedby={throwStatusId}
         aria-label={buttonLabel}
         className="coinInteractionSurface"
-        disabled={pendingToss !== null}
+        disabled={pendingTossId !== null}
         onClick={handleInteraction}
         type="button"
       >
