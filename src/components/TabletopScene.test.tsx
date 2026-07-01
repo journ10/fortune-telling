@@ -139,7 +139,7 @@ describe('TabletopScene', () => {
       if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
         const material = child.material;
 
-        if (material.map && material.side === THREE.DoubleSide) {
+        if (material.map && material.emissiveMap === material.map) {
           faceMaterials.push(material);
         }
       }
@@ -151,6 +151,45 @@ describe('TabletopScene', () => {
       expect(material.bumpScale).toBeGreaterThan(0);
       expect(material.bumpScale).toBeLessThanOrEqual(0.012);
     });
+  });
+
+  it('renders coin faces front-side only so lettering is never shown mirrored from behind', () => {
+    const coin = createCoinGroup(0);
+    const faceMaterials: THREE.MeshStandardMaterial[] = [];
+
+    coin.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
+        const material = child.material;
+
+        if (material.map && material.emissiveMap === material.map) {
+          faceMaterials.push(material);
+        }
+      }
+    });
+
+    expect(faceMaterials).toHaveLength(2);
+    faceMaterials.forEach((material) => {
+      expect(material.side).toBe(THREE.FrontSide);
+    });
+  });
+
+  it('uses a patinated edge texture instead of a flat side material', () => {
+    const coin = createCoinGroup(0);
+    const body = coin.children.find(
+      (child): child is THREE.Mesh<THREE.ExtrudeGeometry, THREE.Material | THREE.Material[]> =>
+        child instanceof THREE.Mesh && child.geometry instanceof THREE.ExtrudeGeometry
+    );
+
+    expect(body).toBeDefined();
+    expect(Array.isArray(body?.material)).toBe(true);
+
+    const materials = body?.material as THREE.Material[];
+    const edgeMaterial = materials[1] as THREE.MeshStandardMaterial;
+
+    expect(edgeMaterial).toBeInstanceOf(THREE.MeshStandardMaterial);
+    expect(edgeMaterial.map).toBeTruthy();
+    expect(edgeMaterial.bumpMap).toBe(edgeMaterial.map);
+    expect(edgeMaterial.roughness).toBeGreaterThanOrEqual(0.9);
   });
 
   it('references a project coin texture sheet asset for WebGL coin faces', () => {

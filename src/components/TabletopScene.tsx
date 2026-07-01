@@ -431,6 +431,70 @@ export function createTabletopTexture(): THREE.CanvasTexture {
   return createTextureFromCanvas(canvas);
 }
 
+function createCoinEdgeTexture(variant: number): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+
+  if (!context || typeof context.fillRect !== 'function') {
+    return createTextureFromCanvas(canvas);
+  }
+
+  const random = createSeededRandom(0x7f4a7c15 + variant * 193);
+  const base = context.createLinearGradient(0, 0, 0, canvas.height);
+  base.addColorStop(0, '#160f0a');
+  base.addColorStop(0.16, '#7f5634');
+  base.addColorStop(0.36, '#2f2016');
+  base.addColorStop(0.58, '#a67545');
+  base.addColorStop(0.78, '#3b2718');
+  base.addColorStop(1, '#120c08');
+  context.fillStyle = base;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let x = 0; x < canvas.width; x += 1) {
+    const oxide = Math.sin(x * 0.07 + variant) * 0.5 + Math.sin(x * 0.019) * 0.5;
+
+    if (oxide > 0.44) {
+      context.fillStyle = `rgba(34, 92, 75, ${0.12 + oxide * 0.12})`;
+      context.fillRect(x, 0, 1 + random() * 2, canvas.height);
+    } else if (oxide < -0.62) {
+      context.fillStyle = `rgba(0, 0, 0, ${0.12 + Math.abs(oxide) * 0.08})`;
+      context.fillRect(x, 0, 1 + random() * 3, canvas.height);
+    }
+  }
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    const ridge = Math.sin(y * 0.62) * 18 + Math.sin(y * 2.6) * 6;
+    const alpha = 0.11 + Math.abs(ridge) / 180;
+
+    context.fillStyle =
+      ridge > 0 ? `rgba(224, 165, 91, ${alpha})` : `rgba(0, 0, 0, ${alpha + 0.04})`;
+    context.fillRect(0, y, canvas.width, 1);
+  }
+
+  for (let mark = 0; mark < 180; mark += 1) {
+    const x = random() * canvas.width;
+    const y = random() * canvas.height;
+    const length = 10 + random() * 70;
+    const height = 0.8 + random() * 2.8;
+
+    context.fillStyle =
+      random() > 0.24
+        ? `rgba(${38 + random() * 86}, ${24 + random() * 52}, ${12 + random() * 28}, ${0.2 + random() * 0.28})`
+        : `rgba(${28 + random() * 36}, ${96 + random() * 72}, ${72 + random() * 50}, ${0.24 + random() * 0.34})`;
+    context.fillRect(x, y, length, height);
+  }
+
+  const texture = createTextureFromCanvas(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.repeat.set(2.25, 1);
+  texture.needsUpdate = true;
+
+  return texture;
+}
+
 export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = FACE_TEXTURE_SIZE;
@@ -756,20 +820,31 @@ function createCoinFaceMaterial(
     polygonOffsetFactor: -10,
     polygonOffsetUnits: -10,
     roughness: face === 'heads' ? 0.94 : 0.97,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
     toneMapped: true
   });
 }
 
 export function createCoinGroup(variant: number, coinTexture?: THREE.Texture): THREE.Group {
   const group = new THREE.Group();
+  const edgeTexture = createCoinEdgeTexture(variant);
   const body = new THREE.Mesh(
     createCoinBodyGeometry(),
-    new THREE.MeshStandardMaterial({
-      color: variant % 2 === 0 ? 0x513722 : 0x463124,
-      metalness: 0.24,
-      roughness: 0.91
-    })
+    [
+      new THREE.MeshStandardMaterial({
+        color: variant % 2 === 0 ? 0x513722 : 0x463124,
+        metalness: 0.24,
+        roughness: 0.91
+      }),
+      new THREE.MeshStandardMaterial({
+        bumpMap: edgeTexture,
+        bumpScale: 0.006,
+        color: 0xffffff,
+        map: edgeTexture,
+        metalness: 0.16,
+        roughness: 0.96
+      })
+    ]
   );
   const heads = new THREE.Mesh(
     createCoinFaceGeometry(),
