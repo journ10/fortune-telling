@@ -369,9 +369,9 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
     context.font = '700 74px "Songti SC", "STSong", "Noto Serif CJK SC", serif';
     context.textAlign = 'center';
     context.textBaseline = 'middle';
-    context.fillStyle = 'rgba(67, 31, 11, 0.88)';
-    context.strokeStyle = 'rgba(255, 220, 144, 0.35)';
-    context.lineWidth = 3;
+    context.fillStyle = 'rgba(25, 10, 3, 0.96)';
+    context.strokeStyle = 'rgba(255, 230, 154, 0.72)';
+    context.lineWidth = 5;
 
     [
       ['乾', center, center - 132],
@@ -383,8 +383,8 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
       context.fillText(String(character), Number(x), Number(y));
     });
   } else {
-    context.strokeStyle = 'rgba(14, 36, 31, 0.78)';
-    context.lineWidth = 15;
+    context.strokeStyle = 'rgba(5, 24, 19, 0.88)';
+    context.lineWidth = 17;
 
     [-64, 64].forEach((offset, column) => {
       context.beginPath();
@@ -405,8 +405,8 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
       context.stroke();
     });
 
-    context.strokeStyle = 'rgba(153, 190, 134, 0.42)';
-    context.lineWidth = 5;
+    context.strokeStyle = 'rgba(191, 218, 153, 0.62)';
+    context.lineWidth = 6;
     context.beginPath();
     context.arc(center, center, coinRadius * 0.55, -0.9, 0.18);
     context.stroke();
@@ -496,28 +496,34 @@ export function createCoinGroup(variant: number): THREE.Group {
   );
   const heads = new THREE.Mesh(
     createCoinFaceGeometry(),
-    new THREE.MeshStandardMaterial({
+    new THREE.MeshBasicMaterial({
+      depthWrite: false,
       map: createCoinFaceTexture('heads', variant),
-      metalness: 0.64,
       polygonOffset: true,
-      polygonOffsetFactor: -1,
-      roughness: 0.5
+      polygonOffsetFactor: -10,
+      polygonOffsetUnits: -10,
+      side: THREE.DoubleSide,
+      toneMapped: false
     })
   );
   const tails = new THREE.Mesh(
     createCoinFaceGeometry(),
-    new THREE.MeshStandardMaterial({
+    new THREE.MeshBasicMaterial({
+      depthWrite: false,
       map: createCoinFaceTexture('tails', variant),
-      metalness: 0.42,
       polygonOffset: true,
-      polygonOffsetFactor: -1,
-      roughness: 0.68
+      polygonOffsetFactor: -10,
+      polygonOffsetUnits: -10,
+      side: THREE.DoubleSide,
+      toneMapped: false
     })
   );
 
-  heads.position.z = COIN_THICKNESS / 2 + 0.004;
-  tails.position.z = -COIN_THICKNESS / 2 - 0.004;
+  heads.position.z = COIN_THICKNESS / 2 + 0.02;
+  tails.position.z = -COIN_THICKNESS / 2 - 0.02;
   tails.rotation.y = Math.PI;
+  heads.renderOrder = 2;
+  tails.renderOrder = 2;
 
   [body, heads, tails].forEach((mesh) => {
     mesh.castShadow = true;
