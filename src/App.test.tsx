@@ -303,7 +303,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '修改 AI 配置' })).toBeInTheDocument();
   });
 
-  it('returns from result-time AI settings without saving when edited settings are incomplete', async () => {
+  it('ignores unsaved incomplete result-time AI settings when restarting from a failed result', async () => {
     const user = userEvent.setup();
     const fetcher = vi.fn(async () => ({
       ok: false,
@@ -332,6 +332,12 @@ describe('App', () => {
     expect(screen.getByRole('dialog', { name: 'AI 解读' })).toBeInTheDocument();
     expect(screen.getByText('AI 解卦失败：model not found')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '所问之事' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '重新起卦' }));
+
+    expect(screen.getByRole('dialog', { name: '所问之事' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'AI 配置' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'AI 解读' })).not.toBeInTheDocument();
   });
 
   it('resets an AI failure and returns to the question dialog without requiring AI settings again', async () => {

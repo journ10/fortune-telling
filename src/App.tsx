@@ -142,6 +142,11 @@ export default function App() {
     setActiveDialog(null);
   }, [aiSettings, isAiConfigured, session.castingResult, session.phase]);
 
+  const closeResultAiSettings = useCallback(() => {
+    setAiSettings(submittedAiSettings);
+    setActiveDialog('result');
+  }, [submittedAiSettings]);
+
   const startCasting = useCallback(
     (question: string, questionType: QuestionType) => {
       pendingTossRef.current = null;
@@ -182,9 +187,10 @@ export default function App() {
     setAiInterpretation(null);
     setAiStatus(null);
     setAiRequestNonce(0);
-    setActiveDialog(isAiConfigured ? 'question' : 'ai-settings');
+    setAiSettings(submittedAiSettings);
+    setActiveDialog(isSubmittedAiConfigured ? 'question' : 'ai-settings');
     session.reset();
-  }, [isAiConfigured, session]);
+  }, [isSubmittedAiConfigured, session, submittedAiSettings]);
 
   const retryAi = useCallback(() => {
     if (!isSubmittedAiConfigured) {
@@ -216,7 +222,7 @@ export default function App() {
           aiSettings={aiSettings}
           isAiConfigured={isAiConfigured}
           onAiSettingsChange={setAiSettings}
-          onClose={resultAvailable ? () => setActiveDialog('result') : undefined}
+          onClose={resultAvailable ? closeResultAiSettings : undefined}
           onSubmit={handleAiSettingsSubmit}
         />
       ) : null}
