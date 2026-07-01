@@ -146,11 +146,9 @@ export function ResultDialog({
       className="resultModal"
       footer={
         <>
-          {hasAiError ? null : (
-            <button className="secondaryButton" type="button" onClick={onReset}>
-              重新起卦
-            </button>
-          )}
+          <button className="secondaryButton" type="button" onClick={onReset}>
+            重新起卦
+          </button>
           {hasAiError ? (
             <>
               <button className="secondaryButton" type="button" onClick={onEditAiSettings}>

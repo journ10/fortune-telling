@@ -38,12 +38,14 @@ interface RenderResultDialogOptions {
   aiInterpretation?: AiInterpretation | null;
   aiStatus?: AiReadingStatus | null;
   fixture?: ResultDialogFixture;
+  onReset?: () => void;
 }
 
 function renderResultDialog({
   aiInterpretation,
   aiStatus,
-  fixture = buildResultDialogFixture()
+  fixture = buildResultDialogFixture(),
+  onReset = vi.fn()
 }: RenderResultDialogOptions = {}) {
   render(
     <ResultDialog
@@ -52,13 +54,13 @@ function renderResultDialog({
       castingResult={fixture.castingResult}
       tosses={fixture.casting.tosses}
       onClose={vi.fn()}
-      onReset={vi.fn()}
+      onReset={onReset}
       onRetryAi={vi.fn()}
       onEditAiSettings={vi.fn()}
     />
   );
 
-  return fixture;
+  return { fixture, onReset };
 }
 
 function getVisibleTabPanel(): HTMLElement {
@@ -118,9 +120,13 @@ describe('ResultDialog', () => {
     expect(within(visiblePanel).getByText(/本卦卦辞：夬。扬于王庭/)).toBeInTheDocument();
   });
 
-  it('renders AI failure actions without interpretation content or reset action', () => {
+  it('renders AI failure actions without interpretation content and allows reset', async () => {
+    const user = userEvent.setup();
+    const onReset = vi.fn();
+
     renderResultDialog({
-      aiStatus: { state: 'error', message: 'AI 解卦失败：model not found' }
+      aiStatus: { state: 'error', message: 'AI 解卦失败：model not found' },
+      onReset
     });
 
     const dialog = screen.getByRole('dialog', { name: 'AI 解读' });
@@ -134,7 +140,8 @@ describe('ResultDialog', () => {
     expect(within(dialog).queryByText('行动建议')).not.toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: '重试 AI 解读' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: '修改 AI 配置' })).toBeInTheDocument();
-    expect(within(dialog).queryByRole('button', { name: '重新起卦' })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: '重新起卦' }));
+    expect(onReset).toHaveBeenCalledTimes(1);
   });
 
   it('renders loading AI state without local reading sections or error actions', () => {
