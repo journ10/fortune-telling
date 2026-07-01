@@ -116,6 +116,10 @@ describe('App', () => {
     expect(screen.getByRole('dialog', { name: 'AI 配置' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeInTheDocument();
+    expect(document.querySelector('.tabletopScene')).toBeInTheDocument();
+    expect(document.querySelector('.questionPanel')).not.toBeInTheDocument();
+    expect(document.querySelector('.resultPanel')).not.toBeInTheDocument();
+    expect(document.querySelector('.castingPanel')).not.toBeInTheDocument();
     expect(screen.queryByText('三钱成卦')).not.toBeInTheDocument();
     expect(fetcher).not.toHaveBeenCalled();
   });
