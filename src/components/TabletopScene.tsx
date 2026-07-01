@@ -16,6 +16,7 @@ const FALLBACK_FACES: CoinFace[] = ['heads', 'tails', 'heads'];
 const SETTLE_DELAY_MS = 320;
 const SCENE_WIDTH = 720;
 const SCENE_HEIGHT = 480;
+const COIN_RADIUS = 0.62;
 
 const visuallyHiddenStyle: CSSProperties = {
   border: 0,
@@ -48,7 +49,7 @@ function getTime(): number {
 }
 
 function targetRotationForFace(face: CoinFace): number {
-  return face === 'heads' ? 0 : Math.PI;
+  return face === 'heads' ? -Math.PI / 2 : Math.PI / 2;
 }
 
 function createPendingTossKey(currentThrow: number, pendingToss: CoinToss | null): string | null {
@@ -66,6 +67,32 @@ function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
   }
 
   material.dispose();
+}
+
+function createCoinGeometry(): THREE.ExtrudeGeometry {
+  const shape = new THREE.Shape();
+  shape.absarc(0, 0, COIN_RADIUS, 0, Math.PI * 2, false);
+
+  const squareHoleSize = 0.17;
+  const squareHole = new THREE.Path();
+  squareHole.moveTo(-squareHoleSize, -squareHoleSize);
+  squareHole.lineTo(squareHoleSize, -squareHoleSize);
+  squareHole.lineTo(squareHoleSize, squareHoleSize);
+  squareHole.lineTo(-squareHoleSize, squareHoleSize);
+  squareHole.lineTo(-squareHoleSize, -squareHoleSize);
+  shape.holes.push(squareHole);
+
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.1,
+    bevelEnabled: true,
+    bevelSegments: 3,
+    bevelSize: 0.018,
+    bevelThickness: 0.018,
+    curveSegments: 96
+  });
+  geometry.center();
+
+  return geometry;
 }
 
 export default function TabletopScene({
@@ -97,19 +124,24 @@ export default function TabletopScene({
     }
 
     const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x121611);
     const camera = new THREE.PerspectiveCamera(35, SCENE_WIDTH / SCENE_HEIGHT, 0.1, 100);
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    const coinGeometry = new THREE.CylinderGeometry(0.56, 0.56, 0.1, 72);
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      preserveDrawingBuffer: true
+    });
+    const coinGeometry = createCoinGeometry();
     const coinMaterial = new THREE.MeshStandardMaterial({
       color: 0xb87333,
-      metalness: 0.86,
-      roughness: 0.26
+      metalness: 0.78,
+      roughness: 0.34
     });
-    const tabletopGeometry = new THREE.PlaneGeometry(8, 5);
+    const tabletopGeometry = new THREE.PlaneGeometry(13, 9);
     const tabletopMaterial = new THREE.MeshStandardMaterial({
-      color: 0x2b211a,
+      color: 0x263c34,
       metalness: 0.04,
-      roughness: 0.88
+      roughness: 0.92
     });
     const tabletop = new THREE.Mesh(tabletopGeometry, tabletopMaterial);
     const coins = FALLBACK_FACES.map((face, index) => {
