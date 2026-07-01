@@ -1,5 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import * as THREE from 'three';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { createCoinToss } from '../domain/coinToss';
 import type { CoinFace } from '../domain/types';
@@ -7,7 +8,10 @@ import type { CoinToss } from '../domain/types';
 import TabletopScene, {
   MIN_COIN_LANDING_DISTANCE,
   TABLETOP_COIN_RADIUS,
-  createCoinAnimationPlans
+  TABLETOP_COIN_THICKNESS,
+  computeCoinTableContactY,
+  createCoinAnimationPlans,
+  createCoinGroup
 } from './TabletopScene';
 
 interface RenderTabletopSceneOptions {
@@ -80,6 +84,38 @@ describe('TabletopScene', () => {
         });
       });
     }
+  });
+
+  it('keeps the coin body above the tabletop for tilted and upright rotations', () => {
+    const rotations = [
+      new THREE.Euler(-Math.PI / 2, 0, 0),
+      new THREE.Euler(0, 0, 0),
+      new THREE.Euler(Math.PI / 4, Math.PI / 3, Math.PI / 6),
+      new THREE.Euler(Math.PI * 0.82, Math.PI * 0.35, Math.PI * 0.18)
+    ];
+
+    rotations.forEach((rotation) => {
+      const contactY = computeCoinTableContactY(rotation);
+      const normal = new THREE.Vector3(0, 0, 1).applyEuler(rotation);
+      const verticalHalfExtent =
+        TABLETOP_COIN_RADIUS * Math.sqrt(1 - normal.y * normal.y) +
+        (TABLETOP_COIN_THICKNESS / 2) * Math.abs(normal.y);
+
+      expect(contactY).toBeGreaterThanOrEqual(verticalHalfExtent);
+    });
+  });
+
+  it('builds traditional coins with 3D relief details instead of only flat face textures', () => {
+    const coin = createCoinGroup(0);
+    const reliefMeshes: THREE.Object3D[] = [];
+
+    coin.traverse((child) => {
+      if (child.userData.relief === true) {
+        reliefMeshes.push(child);
+      }
+    });
+
+    expect(reliefMeshes.length).toBeGreaterThanOrEqual(18);
   });
 
   it('renders the coin interaction without question or AI copy', async () => {

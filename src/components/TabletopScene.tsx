@@ -19,9 +19,14 @@ const SETTLE_CALLBACK_DELAY_MS = SETTLE_DELAY_MS + SETTLED_HOLD_MS;
 const SCENE_WIDTH = 720;
 const SCENE_HEIGHT = 480;
 export const TABLETOP_COIN_RADIUS = 0.5;
+export const TABLETOP_COIN_THICKNESS = 0.082;
 const COIN_RADIUS = TABLETOP_COIN_RADIUS;
-const COIN_THICKNESS = 0.082;
-const COIN_REST_Y = COIN_THICKNESS / 2 + 0.018;
+const COIN_THICKNESS = TABLETOP_COIN_THICKNESS;
+const COIN_FACE_TEXTURE_OFFSET = 0.02;
+const COIN_RELIEF_DEPTH = 0.018;
+const COIN_RELIEF_GAP = 0.003;
+const COIN_SURFACE_EXTENSION = COIN_FACE_TEXTURE_OFFSET + COIN_RELIEF_GAP + COIN_RELIEF_DEPTH;
+const TABLETOP_CONTACT_CLEARANCE = 0.006;
 const FACE_TEXTURE_SIZE = 512;
 export const MIN_COIN_LANDING_DISTANCE = TABLETOP_COIN_RADIUS * 2.08;
 const COIN_LANDING_SEPARATION_MARGIN = 0.012;
@@ -205,6 +210,17 @@ export function createCoinAnimationPlans(
   }
 
   return plans;
+}
+
+export function computeCoinTableContactY(rotation: THREE.Euler, tableY = 0): number {
+  const normal = new THREE.Vector3(0, 0, 1).applyEuler(rotation);
+  const normalY = clamp(normal.y, -1, 1);
+  const radialVerticalExtent =
+    TABLETOP_COIN_RADIUS * Math.sqrt(Math.max(0, 1 - normalY * normalY));
+  const surfaceVerticalExtent =
+    (TABLETOP_COIN_THICKNESS / 2 + COIN_SURFACE_EXTENSION) * Math.abs(normalY);
+
+  return tableY + radialVerticalExtent + surfaceVerticalExtent + TABLETOP_CONTACT_CLEARANCE;
 }
 
 function createPendingTossKey(currentThrow: number, pendingToss: CoinToss | null): string | null {
@@ -550,6 +566,183 @@ function createCoinFaceGeometry(): THREE.ShapeGeometry {
   return geometry;
 }
 
+interface ReliefStrokeSpec {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+}
+
+const HEADS_RELIEF_STROKES: ReliefStrokeSpec[] = [
+  { x: -0.036, y: 0.054, width: 0.13, height: 0.017, rotation: 0.03 },
+  { x: 0.026, y: 0.018, width: 0.018, height: 0.13, rotation: 0.02 },
+  { x: -0.042, y: -0.026, width: 0.102, height: 0.016, rotation: -0.12 },
+  { x: 0.05, y: -0.058, width: 0.018, height: 0.084, rotation: 0.26 },
+  { x: -0.034, y: -0.064, width: 0.074, height: 0.015, rotation: 0.18 }
+];
+
+const TAILS_RELIEF_STROKES: ReliefStrokeSpec[] = [
+  { x: 0, y: 0, width: 0.024, height: 0.27, rotation: 0.08 },
+  { x: -0.026, y: -0.098, width: 0.074, height: 0.017, rotation: -0.32 },
+  { x: 0.023, y: 0.006, width: 0.084, height: 0.017, rotation: 0.42 },
+  { x: -0.008, y: 0.112, width: 0.066, height: 0.016, rotation: -0.18 }
+];
+
+function createReliefMaterial(face: CoinFace, variant: number): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color:
+      face === 'heads'
+        ? variant % 2 === 0
+          ? 0xd09245
+          : 0xbe7d38
+        : variant % 2 === 0
+          ? 0x678460
+          : 0x54735a,
+    metalness: face === 'heads' ? 0.82 : 0.58,
+    roughness: face === 'heads' ? 0.38 : 0.72
+  });
+}
+
+function markReliefMesh<TMesh extends THREE.Mesh>(mesh: TMesh): TMesh {
+  mesh.userData.relief = true;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.renderOrder = 4;
+
+  return mesh;
+}
+
+function createReliefBar(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  rotation: number,
+  outward: 1 | -1,
+  material: THREE.Material
+): THREE.Mesh {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, COIN_RELIEF_DEPTH), material);
+
+  mesh.position.set(
+    x,
+    y,
+    outward *
+      (COIN_THICKNESS / 2 + COIN_FACE_TEXTURE_OFFSET + COIN_RELIEF_GAP + COIN_RELIEF_DEPTH / 2)
+  );
+  mesh.rotation.z = rotation;
+
+  return markReliefMesh(mesh);
+}
+
+function createReliefRing(
+  radius: number,
+  tubeRadius: number,
+  outward: 1 | -1,
+  material: THREE.Material
+): THREE.Mesh {
+  const mesh = new THREE.Mesh(new THREE.TorusGeometry(radius, tubeRadius, 8, 128), material);
+
+  mesh.position.z =
+    outward * (COIN_THICKNESS / 2 + COIN_FACE_TEXTURE_OFFSET + COIN_RELIEF_GAP + tubeRadius);
+
+  return markReliefMesh(mesh);
+}
+
+function addSquareHoleRelief(
+  group: THREE.Group,
+  outward: 1 | -1,
+  material: THREE.Material
+): void {
+  const rail = 0.034;
+  const length = 0.368;
+  const offset = 0.161;
+
+  [
+    createReliefBar(0, offset, length, rail, 0, outward, material),
+    createReliefBar(0, -offset, length, rail, 0, outward, material),
+    createReliefBar(offset, 0, rail, length, 0, outward, material),
+    createReliefBar(-offset, 0, rail, length, 0, outward, material)
+  ].forEach((mesh) => group.add(mesh));
+}
+
+function addReliefStrokeCluster(
+  group: THREE.Group,
+  anchorX: number,
+  anchorY: number,
+  clusterRotation: number,
+  scale: number,
+  outward: 1 | -1,
+  material: THREE.Material,
+  strokes: ReliefStrokeSpec[]
+): void {
+  const cosine = Math.cos(clusterRotation);
+  const sine = Math.sin(clusterRotation);
+
+  strokes.forEach((stroke) => {
+    const localX = stroke.x * scale;
+    const localY = stroke.y * scale;
+    const x = anchorX + localX * cosine - localY * sine;
+    const y = anchorY + localX * sine + localY * cosine;
+
+    group.add(
+      createReliefBar(
+        x,
+        y,
+        stroke.width * scale,
+        stroke.height * scale,
+        clusterRotation + stroke.rotation,
+        outward,
+        material
+      )
+    );
+  });
+}
+
+function addTraditionalCoinRelief(group: THREE.Group, variant: number): void {
+  const headsMaterial = createReliefMaterial('heads', variant);
+  const tailsMaterial = createReliefMaterial('tails', variant);
+
+  group.add(createReliefRing(0.43, 0.008, 1, headsMaterial));
+  group.add(createReliefRing(0.43, 0.007, -1, tailsMaterial));
+  addSquareHoleRelief(group, 1, headsMaterial);
+  addSquareHoleRelief(group, -1, tailsMaterial);
+
+  [
+    { x: 0, y: 0.285, rotation: 0, scale: 1 },
+    { x: 0, y: -0.285, rotation: Math.PI, scale: 0.95 },
+    { x: 0.285, y: 0, rotation: -Math.PI / 2, scale: 0.96 },
+    { x: -0.285, y: 0, rotation: Math.PI / 2, scale: 0.96 }
+  ].forEach((cluster) => {
+    addReliefStrokeCluster(
+      group,
+      cluster.x,
+      cluster.y,
+      cluster.rotation,
+      cluster.scale,
+      1,
+      headsMaterial,
+      HEADS_RELIEF_STROKES
+    );
+  });
+
+  [
+    { x: -0.13, rotation: -0.08, scale: 1 },
+    { x: 0.13, rotation: 0.08, scale: 0.98 }
+  ].forEach((cluster) => {
+    addReliefStrokeCluster(
+      group,
+      cluster.x,
+      0,
+      cluster.rotation,
+      cluster.scale,
+      -1,
+      tailsMaterial,
+      TAILS_RELIEF_STROKES
+    );
+  });
+}
+
 export function createCoinGroup(variant: number): THREE.Group {
   const group = new THREE.Group();
   const body = new THREE.Mesh(
@@ -562,31 +755,35 @@ export function createCoinGroup(variant: number): THREE.Group {
   );
   const heads = new THREE.Mesh(
     createCoinFaceGeometry(),
-    new THREE.MeshBasicMaterial({
+    new THREE.MeshStandardMaterial({
       depthWrite: false,
       map: createCoinFaceTexture('heads', variant),
+      metalness: 0.66,
       polygonOffset: true,
       polygonOffsetFactor: -10,
       polygonOffsetUnits: -10,
+      roughness: 0.48,
       side: THREE.DoubleSide,
-      toneMapped: false
+      toneMapped: true
     })
   );
   const tails = new THREE.Mesh(
     createCoinFaceGeometry(),
-    new THREE.MeshBasicMaterial({
+    new THREE.MeshStandardMaterial({
       depthWrite: false,
       map: createCoinFaceTexture('tails', variant),
+      metalness: 0.42,
       polygonOffset: true,
       polygonOffsetFactor: -10,
       polygonOffsetUnits: -10,
+      roughness: 0.78,
       side: THREE.DoubleSide,
-      toneMapped: false
+      toneMapped: true
     })
   );
 
-  heads.position.z = COIN_THICKNESS / 2 + 0.02;
-  tails.position.z = -COIN_THICKNESS / 2 - 0.02;
+  heads.position.z = COIN_THICKNESS / 2 + COIN_FACE_TEXTURE_OFFSET;
+  tails.position.z = -COIN_THICKNESS / 2 - COIN_FACE_TEXTURE_OFFSET;
   tails.rotation.y = Math.PI;
   heads.renderOrder = 2;
   tails.renderOrder = 2;
@@ -596,6 +793,8 @@ export function createCoinGroup(variant: number): THREE.Group {
     mesh.receiveShadow = true;
     group.add(mesh);
   });
+
+  addTraditionalCoinRelief(group, variant);
 
   return group;
 }
@@ -787,23 +986,27 @@ export default function TabletopScene({
             const rotationDamping = 1 - smootherStep(tossProgress);
             const impactWobble =
               Math.sin(impactProgress * Math.PI * 5) * 0.2 * (1 - impactProgress);
-
-            coin.position.set(
+            const rotationX =
+              plan.finalRotationX + plan.spinX * Math.PI * 2 * rotationDamping + impactWobble;
+            const rotationY = plan.spinY * Math.PI * 2 * rotationDamping;
+            const rotationZ = plan.finalRotationZ + plan.spinZ * Math.PI * 2 * rotationDamping;
+            const currentRotation = new THREE.Euler(rotationX, rotationY, rotationZ);
+            const contactY = computeCoinTableContactY(currentRotation);
+            const positionX =
               lerp(plan.hoverX, plan.landingX, travelProgress) +
-                plan.curveX * pathCurve * (1 - tossProgress * 0.34) +
-                plan.slideX * slideProgress,
+              plan.curveX * pathCurve * (1 - tossProgress * 0.34) +
+              plan.slideX * slideProgress;
+            const positionY =
               tossProgress < 0.72
-                ? lerp(plan.hoverY, COIN_REST_Y + 0.04, easeInCubic(descentProgress))
-                : COIN_REST_Y + bounce,
+                ? lerp(plan.hoverY, contactY + 0.04, easeInCubic(descentProgress))
+                : contactY + bounce;
+            const positionZ =
               lerp(plan.hoverZ, plan.landingZ, travelProgress) +
-                plan.curveZ * pathCurve * (1 - tossProgress * 0.26) +
-                plan.slideZ * slideProgress
-            );
-            coin.rotation.set(
-              plan.finalRotationX + plan.spinX * Math.PI * 2 * rotationDamping + impactWobble,
-              plan.spinY * Math.PI * 2 * rotationDamping,
-              plan.finalRotationZ + plan.spinZ * Math.PI * 2 * rotationDamping
-            );
+              plan.curveZ * pathCurve * (1 - tossProgress * 0.26) +
+              plan.slideZ * slideProgress;
+
+            coin.position.set(positionX, Math.max(positionY, contactY), positionZ);
+            coin.rotation.copy(currentRotation);
           } else {
             coin.position.set(
               plan.hoverX + Math.sin(elapsed * 0.62 + plan.phase) * 0.045,
