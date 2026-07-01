@@ -64,6 +64,28 @@ function renderAiInterpretation(aiInterpretation: AiInterpretation) {
   );
 }
 
+function renderTabPanelContent(
+  tab: ResultTab,
+  aiInterpretation: AiInterpretation | null,
+  aiStatus: AiReadingStatus | null | undefined,
+  castingResult: CastingResult,
+  tosses: CoinToss[]
+) {
+  if (tab === 'ai') {
+    return aiInterpretation ? renderAiInterpretation(aiInterpretation) : renderAiFallback(aiStatus);
+  }
+
+  if (tab === 'summary') {
+    return <HexagramFacts castingResult={castingResult} tosses={tosses} view="summary" />;
+  }
+
+  if (tab === 'process') {
+    return <HexagramFacts castingResult={castingResult} tosses={tosses} view="process" />;
+  }
+
+  return <HexagramFacts castingResult={castingResult} tosses={tosses} view="basis" />;
+}
+
 export function ResultDialog({
   aiStatus,
   aiInterpretation,
@@ -119,27 +141,18 @@ export function ResultDialog({
         ))}
       </div>
 
-      <div
-        id={getPanelId(activeTab)}
-        className="resultTabPanel"
-        role="tabpanel"
-        aria-labelledby={getTabId(activeTab)}
-      >
-        {activeTab === 'ai'
-          ? aiInterpretation
-            ? renderAiInterpretation(aiInterpretation)
-            : renderAiFallback(aiStatus)
-          : null}
-        {activeTab === 'summary' ? (
-          <HexagramFacts castingResult={castingResult} tosses={tosses} view="summary" />
-        ) : null}
-        {activeTab === 'process' ? (
-          <HexagramFacts castingResult={castingResult} tosses={tosses} view="process" />
-        ) : null}
-        {activeTab === 'basis' ? (
-          <HexagramFacts castingResult={castingResult} tosses={tosses} view="basis" />
-        ) : null}
-      </div>
+      {tabs.map((tab) => (
+        <section
+          key={tab.id}
+          id={getPanelId(tab.id)}
+          className="resultTabPanel"
+          role="tabpanel"
+          aria-labelledby={getTabId(tab.id)}
+          hidden={activeTab !== tab.id}
+        >
+          {renderTabPanelContent(tab.id, aiInterpretation, aiStatus, castingResult, tosses)}
+        </section>
+      ))}
     </ModalLayer>
   );
 }

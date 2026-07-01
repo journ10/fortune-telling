@@ -120,6 +120,21 @@ describe('ResultDialog', () => {
     expect(within(dialog).getByRole('button', { name: '修改 AI 配置' })).toBeInTheDocument();
   });
 
+  it('keeps every tab aria-controls target mounted while the AI tab is active', () => {
+    renderResultDialog();
+
+    const dialog = screen.getByRole('dialog', { name: 'AI 解读' });
+    const tabControls = within(dialog)
+      .getAllByRole('tab')
+      .map((tab) => tab.getAttribute('aria-controls'));
+
+    expect(tabControls).toHaveLength(4);
+    for (const controlsId of tabControls) {
+      expect(controlsId).toBeTruthy();
+      expect(document.getElementById(controlsId as string)).toBeInTheDocument();
+    }
+  });
+
   it('renders stable casting facts without changed hexagram or moving lines', async () => {
     const user = userEvent.setup();
     const tosses = [
