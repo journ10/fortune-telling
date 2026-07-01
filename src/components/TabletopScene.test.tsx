@@ -59,6 +59,17 @@ describe('TabletopScene', () => {
     expect(TABLETOP_COIN_RADIUS).toBeLessThanOrEqual(0.52);
   });
 
+  it('uses a thin cash-coin silhouette instead of a token-like slab', () => {
+    expect(TABLETOP_COIN_THICKNESS / (TABLETOP_COIN_RADIUS * 2)).toBeLessThanOrEqual(0.045);
+
+    const coin = createCoinGroup(0);
+    const bounds = new THREE.Box3().setFromObject(coin);
+    const size = new THREE.Vector3();
+    bounds.getSize(size);
+
+    expect(size.z / (TABLETOP_COIN_RADIUS * 2)).toBeLessThanOrEqual(0.07);
+  });
+
   it('keeps generated coin resting points from overlapping', () => {
     const faceSets: CoinFace[][] = [
       ['heads', 'heads', 'heads'],

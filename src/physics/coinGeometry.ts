@@ -1,2 +1,2 @@
 export const TABLETOP_COIN_RADIUS = 0.5;
-export const TABLETOP_COIN_THICKNESS = 0.082;
+export const TABLETOP_COIN_THICKNESS = 0.034;

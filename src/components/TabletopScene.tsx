@@ -32,9 +32,9 @@ const SCENE_HEIGHT = 480;
 export { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS };
 const COIN_RADIUS = TABLETOP_COIN_RADIUS;
 const COIN_THICKNESS = TABLETOP_COIN_THICKNESS;
-const COIN_FACE_TEXTURE_OFFSET = 0.02;
-const COIN_RELIEF_DEPTH = 0.018;
-const COIN_RELIEF_GAP = 0.003;
+const COIN_FACE_TEXTURE_OFFSET = 0.004;
+const COIN_RELIEF_DEPTH = 0.0025;
+const COIN_RELIEF_GAP = 0.0008;
 const COIN_SURFACE_EXTENSION = COIN_FACE_TEXTURE_OFFSET + COIN_RELIEF_GAP + COIN_RELIEF_DEPTH;
 const TABLETOP_CONTACT_CLEARANCE = 0.006;
 const FACE_TEXTURE_SIZE = 512;
@@ -304,6 +304,46 @@ function createTextureFromCanvas(canvas: HTMLCanvasElement): THREE.CanvasTexture
   return texture;
 }
 
+function createLoadedTexture(image: TexImageSource): THREE.Texture {
+  const texture = new THREE.Texture(image);
+
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  texture.needsUpdate = true;
+
+  return texture;
+}
+
+async function loadCoinTextureFromAsset(): Promise<THREE.Texture> {
+  const response = await fetch(COIN_TEXTURE_ASSET);
+
+  if (!response.ok) {
+    throw new Error(`Unable to load coin texture: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+
+  if (typeof createImageBitmap === 'function') {
+    return createLoadedTexture(await createImageBitmap(blob));
+  }
+
+  const imageUrl = URL.createObjectURL(blob);
+
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error('Unable to decode coin texture'));
+      element.src = imageUrl;
+    });
+
+    return createLoadedTexture(image);
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
 export function createTabletopTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
@@ -565,9 +605,9 @@ function createCoinBodyGeometry(): THREE.ExtrudeGeometry {
   const geometry = new THREE.ExtrudeGeometry(createCoinShape(), {
     depth: COIN_THICKNESS,
     bevelEnabled: true,
-    bevelSegments: 3,
-    bevelSize: 0.022,
-    bevelThickness: 0.022,
+    bevelSegments: 2,
+    bevelSize: 0.006,
+    bevelThickness: 0.006,
     curveSegments: 96
   });
   geometry.center();
@@ -594,14 +634,11 @@ function createCoinFaceGeometry(): THREE.ShapeGeometry {
 
 function createCoinSheetFaceTexture(face: CoinFace, sourceTexture: THREE.Texture): THREE.Texture {
   const texture = sourceTexture.clone();
-  const cropSize = 860 / 2048;
-  const cropY = (1024 - 430) / 2048;
-  const cropX = face === 'heads' ? (512 - 430) / 2048 : (1536 - 430) / 2048;
 
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
-  texture.offset.set(cropX, cropY);
-  texture.repeat.set(cropSize, cropSize);
+  texture.offset.set(face === 'heads' ? 0 : 0.5, 0);
+  texture.repeat.set(0.5, 1);
   texture.needsUpdate = true;
 
   return texture;
@@ -612,13 +649,15 @@ function createReliefMaterial(face: CoinFace, variant: number): THREE.MeshStanda
     color:
       face === 'heads'
         ? variant % 2 === 0
-          ? 0xd09245
-          : 0xbe7d38
+          ? 0x7b5737
+          : 0x684833
         : variant % 2 === 0
-          ? 0x678460
-          : 0x54735a,
-    metalness: face === 'heads' ? 0.82 : 0.58,
-    roughness: face === 'heads' ? 0.38 : 0.72
+          ? 0x4d5d4c
+          : 0x3f5145,
+    metalness: face === 'heads' ? 0.24 : 0.16,
+    opacity: face === 'heads' ? 0.36 : 0.3,
+    roughness: face === 'heads' ? 0.92 : 0.95,
+    transparent: true
   });
 }
 
@@ -672,9 +711,9 @@ function addSquareHoleRelief(
   outward: 1 | -1,
   material: THREE.Material
 ): void {
-  const rail = 0.034;
-  const length = 0.368;
-  const offset = 0.161;
+  const rail = 0.007;
+  const length = 0.29;
+  const offset = 0.139;
 
   [
     createReliefBar(0, offset, length, rail, 0, outward, material),
@@ -688,10 +727,36 @@ function addTraditionalCoinRelief(group: THREE.Group, variant: number): void {
   const headsMaterial = createReliefMaterial('heads', variant);
   const tailsMaterial = createReliefMaterial('tails', variant);
 
-  group.add(createReliefRing(0.43, 0.008, 1, headsMaterial));
-  group.add(createReliefRing(0.43, 0.007, -1, tailsMaterial));
+  group.add(createReliefRing(0.438, 0.0024, 1, headsMaterial));
+  group.add(createReliefRing(0.438, 0.0021, -1, tailsMaterial));
   addSquareHoleRelief(group, 1, headsMaterial);
   addSquareHoleRelief(group, -1, tailsMaterial);
+}
+
+function createCoinFaceMaterial(
+  face: CoinFace,
+  variant: number,
+  coinTexture?: THREE.Texture
+): THREE.MeshStandardMaterial {
+  const faceTexture = coinTexture
+    ? createCoinSheetFaceTexture(face, coinTexture)
+    : createCoinFaceTexture(face, variant);
+
+  return new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    depthWrite: false,
+    emissive: 0xffffff,
+    emissiveIntensity: face === 'heads' ? 0.18 : 0.22,
+    emissiveMap: faceTexture,
+    map: faceTexture,
+    metalness: face === 'heads' ? 0.08 : 0.05,
+    polygonOffset: true,
+    polygonOffsetFactor: -10,
+    polygonOffsetUnits: -10,
+    roughness: face === 'heads' ? 0.94 : 0.97,
+    side: THREE.DoubleSide,
+    toneMapped: true
+  });
 }
 
 export function createCoinGroup(variant: number, coinTexture?: THREE.Texture): THREE.Group {
@@ -699,42 +764,18 @@ export function createCoinGroup(variant: number, coinTexture?: THREE.Texture): T
   const body = new THREE.Mesh(
     createCoinBodyGeometry(),
     new THREE.MeshStandardMaterial({
-      color: variant % 2 === 0 ? 0xa45f28 : 0x8f5424,
-      metalness: 0.74,
-      roughness: 0.42
+      color: variant % 2 === 0 ? 0x513722 : 0x463124,
+      metalness: 0.24,
+      roughness: 0.91
     })
   );
   const heads = new THREE.Mesh(
     createCoinFaceGeometry(),
-    new THREE.MeshStandardMaterial({
-      depthWrite: false,
-      map: coinTexture
-        ? createCoinSheetFaceTexture('heads', coinTexture)
-        : createCoinFaceTexture('heads', variant),
-      metalness: 0.66,
-      polygonOffset: true,
-      polygonOffsetFactor: -10,
-      polygonOffsetUnits: -10,
-      roughness: 0.48,
-      side: THREE.DoubleSide,
-      toneMapped: true
-    })
+    createCoinFaceMaterial('heads', variant, coinTexture)
   );
   const tails = new THREE.Mesh(
     createCoinFaceGeometry(),
-    new THREE.MeshStandardMaterial({
-      depthWrite: false,
-      map: coinTexture
-        ? createCoinSheetFaceTexture('tails', coinTexture)
-        : createCoinFaceTexture('tails', variant),
-      metalness: 0.42,
-      polygonOffset: true,
-      polygonOffsetFactor: -10,
-      polygonOffsetUnits: -10,
-      roughness: 0.78,
-      side: THREE.DoubleSide,
-      toneMapped: true
-    })
+    createCoinFaceMaterial('tails', variant, coinTexture)
   );
 
   heads.position.z = COIN_THICKNESS / 2 + COIN_FACE_TEXTURE_OFFSET;
@@ -861,10 +902,44 @@ export default function TabletopScene({
         alpha: false,
         preserveDrawingBuffer: true
       });
+      const spawnCoins = (loadedCoinTexture?: THREE.Texture) => {
+        coinGroups.forEach((coin) => {
+          scene.remove(coin);
+          disposeObject3D(coin);
+        });
+        coinGroups = [];
+
+        FALLBACK_FACES.forEach((face, index) => {
+          const coin = createCoinGroup(index, loadedCoinTexture);
+          const plan = coinPlansRef.current[index];
+
+          coinGroups.push(coin);
+          coin.position.set(
+            plan?.hoverX ?? (index - 1) * 1.22,
+            plan?.hoverY ?? 1.18,
+            plan?.hoverZ ?? 0
+          );
+          coin.rotation.x = targetRotationForFace(face);
+          coin.rotation.z = (index - 1) * 0.08;
+          scene.add(coin);
+        });
+      };
       const activeTabletopGeometry = new THREE.PlaneGeometry(13, 9);
-      coinTexture = new THREE.TextureLoader().load(COIN_TEXTURE_ASSET);
-      coinTexture.colorSpace = THREE.SRGBColorSpace;
-      coinTexture.anisotropy = 4;
+      loadCoinTextureFromAsset()
+        .then((loadedTexture) => {
+          if (!isEffectActive) {
+            loadedTexture.dispose();
+            return;
+          }
+
+          coinTexture = loadedTexture;
+          spawnCoins(loadedTexture);
+        })
+        .catch(() => {
+          if (isEffectActive && coinGroups.length === 0) {
+            spawnCoins();
+          }
+        });
       tabletopGeometry = activeTabletopGeometry;
       const tabletopTexture = createTabletopTexture();
       tabletopTexture.wrapS = THREE.RepeatWrapping;
@@ -878,16 +953,6 @@ export default function TabletopScene({
       });
       tabletopMaterial = activeTabletopMaterial;
       const tabletop = new THREE.Mesh(activeTabletopGeometry, activeTabletopMaterial);
-      FALLBACK_FACES.forEach((face, index) => {
-        const coin = createCoinGroup(index, coinTexture ?? undefined);
-        const plan = coinPlansRef.current[index];
-
-        coinGroups.push(coin);
-        coin.position.set(plan?.hoverX ?? (index - 1) * 1.22, plan?.hoverY ?? 1.18, plan?.hoverZ ?? 0);
-        coin.rotation.x = targetRotationForFace(face);
-        coin.rotation.z = (index - 1) * 0.08;
-        scene.add(coin);
-      });
 
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.shadowMap.enabled = true;
