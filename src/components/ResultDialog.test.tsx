@@ -118,18 +118,23 @@ describe('ResultDialog', () => {
     expect(within(visiblePanel).getByText(/本卦卦辞：夬。扬于王庭/)).toBeInTheDocument();
   });
 
-  it('renders AI failure actions without local reading sections', () => {
+  it('renders AI failure actions without interpretation content or reset action', () => {
     renderResultDialog({
-      aiStatus: { state: 'error', message: 'AI 解卦失败：model not found' },
-      aiInterpretation: null
+      aiStatus: { state: 'error', message: 'AI 解卦失败：model not found' }
     });
 
     const dialog = screen.getByRole('dialog', { name: 'AI 解读' });
+    const visiblePanel = getVisibleTabPanel();
+
     expect(within(dialog).getByText('AI 解卦失败：model not found')).toBeInTheDocument();
+    expect(within(visiblePanel).getByRole('heading', { name: 'AI 解卦未生成' })).toBeInTheDocument();
+    expect(within(visiblePanel).queryByText('AI：明断但不冒进')).not.toBeInTheDocument();
+    expect(within(visiblePanel).queryByText('本卦提示事情已经到了需要表态的时候。')).not.toBeInTheDocument();
     expect(within(dialog).queryByText('白话解读')).not.toBeInTheDocument();
     expect(within(dialog).queryByText('行动建议')).not.toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: '重试 AI 解读' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: '修改 AI 配置' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '重新起卦' })).not.toBeInTheDocument();
   });
 
   it('renders loading AI state without local reading sections or error actions', () => {

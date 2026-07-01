@@ -72,6 +72,10 @@ function renderTabPanelContent(
   tosses: CoinToss[]
 ) {
   if (tab === 'ai') {
+    if (aiStatus?.state === 'error') {
+      return renderAiFallback(aiStatus);
+    }
+
     return aiInterpretation ? renderAiInterpretation(aiInterpretation) : renderAiFallback(aiStatus);
   }
 
@@ -142,9 +146,11 @@ export function ResultDialog({
       className="resultModal"
       footer={
         <>
-          <button className="secondaryButton" type="button" onClick={onReset}>
-            重新起卦
-          </button>
+          {hasAiError ? null : (
+            <button className="secondaryButton" type="button" onClick={onReset}>
+              重新起卦
+            </button>
+          )}
           {hasAiError ? (
             <>
               <button className="secondaryButton" type="button" onClick={onEditAiSettings}>
