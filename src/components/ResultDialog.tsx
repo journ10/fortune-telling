@@ -158,7 +158,16 @@ export function ResultDialog({
         </>
       }
     >
-      {aiStatus ? <p className={`aiStatus aiStatus-${aiStatus.state}`}>{aiStatus.message}</p> : null}
+      {aiStatus ? (
+        <p
+          className={`aiStatus aiStatus-${aiStatus.state}`}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {aiStatus.message}
+        </p>
+      ) : null}
 
       <div className="resultTabs" role="tablist" aria-label="结果视图">
         {tabs.map((tab) => (

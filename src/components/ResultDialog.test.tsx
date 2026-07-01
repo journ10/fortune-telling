@@ -132,6 +132,30 @@ describe('ResultDialog', () => {
     expect(within(dialog).getByRole('button', { name: '修改 AI 配置' })).toBeInTheDocument();
   });
 
+  it('renders loading AI state without local reading sections or error actions', () => {
+    renderResultDialog({
+      aiStatus: { state: 'loading', message: 'AI 解卦生成中...' },
+      aiInterpretation: null
+    });
+
+    const dialog = screen.getByRole('dialog', { name: 'AI 解读' });
+    const visiblePanel = getVisibleTabPanel();
+    const status = within(dialog).getByRole('status');
+
+    expect(status).toHaveTextContent('AI 解卦生成中...');
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(status).toHaveAttribute('aria-atomic', 'true');
+    expect(
+      within(visiblePanel).getByText(
+        '正在把所问之事、本卦、动爻、变卦与传统依据发送给你配置的 Provider。'
+      )
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText('白话解读')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('行动建议')).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '重试 AI 解读' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '修改 AI 配置' })).not.toBeInTheDocument();
+  });
+
   it('keeps every tab aria-controls target mounted while the AI tab is active', () => {
     renderResultDialog();
 
