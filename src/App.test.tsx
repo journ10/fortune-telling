@@ -3,11 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
-const SETTLE_DELAY_MS = 320;
+const SETTLE_DELAY_MS = 1700;
+const SETTLED_HOLD_MS = 520;
+const SETTLE_CALLBACK_DELAY_MS = SETTLE_DELAY_MS + SETTLED_HOLD_MS;
 
 async function advanceTossSettlement() {
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(SETTLE_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(SETTLE_CALLBACK_DELAY_MS);
   });
 }
 

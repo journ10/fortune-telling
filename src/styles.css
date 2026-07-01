@@ -82,22 +82,36 @@ h3 {
 .tabletopScene::before {
   z-index: 0;
   background:
-    linear-gradient(90deg, rgba(246, 225, 184, 0.035) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(0, 0, 0, 0.2) 1px, transparent 1px),
-    radial-gradient(ellipse at 50% 42%, rgba(115, 74, 38, 0.34), transparent 38rem),
-    linear-gradient(120deg, rgba(52, 87, 76, 0.38), rgba(20, 15, 12, 0.54));
+    radial-gradient(ellipse at 50% 46%, rgba(194, 129, 63, 0.18), transparent 24rem),
+    repeating-linear-gradient(
+      7deg,
+      rgba(247, 220, 167, 0.045) 0 1px,
+      transparent 1px 21px
+    ),
+    repeating-linear-gradient(
+      96deg,
+      rgba(0, 0, 0, 0.22) 0 1px,
+      transparent 1px 86px
+    ),
+    linear-gradient(124deg, #314234 0%, #2b2418 42%, #11140f 100%);
   background-size:
-    104px 104px,
-    104px 104px,
     auto,
+    220px 220px,
+    100% 100%,
     auto;
 }
 
 .tabletopScene::after {
   z-index: 1;
   background:
-    radial-gradient(ellipse at 50% 54%, transparent 0 22rem, rgba(0, 0, 0, 0.38) 52rem),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035), transparent 24%, transparent 76%, rgba(0, 0, 0, 0.2));
+    linear-gradient(115deg, rgba(255, 235, 183, 0.08), transparent 28%, rgba(0, 0, 0, 0.18) 76%),
+    radial-gradient(ellipse at 50% 54%, transparent 0 19rem, rgba(0, 0, 0, 0.48) 52rem),
+    repeating-linear-gradient(
+      177deg,
+      transparent 0 34px,
+      rgba(255, 238, 189, 0.024) 35px,
+      transparent 37px
+    );
   mix-blend-mode: multiply;
 }
 
@@ -121,8 +135,9 @@ h3 {
   display: grid;
   grid-template-columns: repeat(3, clamp(4.25rem, 8vw, 6.25rem));
   place-content: center;
-  gap: clamp(0.75rem, 2.4vw, 1.5rem);
-  transform: perspective(680px) rotateX(54deg) translateY(1.35rem);
+  gap: clamp(0.9rem, 2.6vw, 1.7rem);
+  filter: drop-shadow(0 2.4rem 1.8rem rgba(0, 0, 0, 0.34));
+  transform: perspective(720px) rotateX(55deg) translateY(0.4rem);
   transform-origin: center;
   pointer-events: none;
 }
@@ -136,46 +151,181 @@ h3 {
   display: block;
   width: 100%;
   aspect-ratio: 1;
-  border: clamp(0.34rem, 0.8vw, 0.56rem) solid #a9682c;
+  overflow: hidden;
+  border: clamp(0.18rem, 0.45vw, 0.28rem) solid #7d421b;
   border-radius: 50%;
+  isolation: isolate;
   background:
-    radial-gradient(circle at 34% 26%, rgba(255, 228, 164, 0.62), transparent 0.72rem),
-    radial-gradient(circle at 66% 72%, rgba(62, 102, 82, 0.38), transparent 1.2rem),
-    linear-gradient(145deg, #d7aa61 0%, #b87333 42%, #5a3119 100%);
+    radial-gradient(circle at 50% 50%, transparent 0 15.8%, rgba(62, 31, 12, 0.72) 16.2% 19%, transparent 19.6%),
+    radial-gradient(circle at 50% 50%, transparent 0 64%, rgba(255, 220, 144, 0.34) 64.6% 70%, rgba(72, 34, 13, 0.42) 71% 74%, transparent 75%),
+    radial-gradient(circle at 34% 26%, rgba(255, 233, 170, 0.68), transparent 19%),
+    radial-gradient(circle at 68% 74%, rgba(65, 105, 82, 0.28), transparent 26%),
+    conic-gradient(from 26deg, #5d2d12, #d29543, #a86225, #3d1e0e, #bd7a31, #5d2d12);
   box-shadow:
-    inset 0 0.46rem 0.85rem rgba(255, 229, 163, 0.28),
-    inset 0 -0.7rem 1rem rgba(40, 20, 9, 0.48),
-    0 1.5rem 2.5rem rgba(0, 0, 0, 0.42);
+    inset 0 0 0 clamp(0.28rem, 0.7vw, 0.45rem) rgba(245, 180, 83, 0.28),
+    inset 0 0 0 clamp(0.52rem, 1.05vw, 0.72rem) rgba(65, 31, 13, 0.42),
+    inset 0 0.5rem 0.75rem rgba(255, 226, 153, 0.22),
+    inset 0 -0.8rem 1rem rgba(28, 13, 6, 0.58),
+    0 0.38rem 0 #4b2611,
+    0 1.8rem 2.5rem rgba(0, 0, 0, 0.42);
+  transform: translateY(-0.8rem) rotate(-5deg);
+}
+
+.fallbackCoin:nth-child(2) {
+  transform: translateY(-1.25rem) rotate(4deg);
+}
+
+.fallbackCoin:nth-child(3) {
+  transform: translateY(-0.95rem) rotate(9deg);
 }
 
 .fallbackCoin::before {
   position: absolute;
   inset: 50% auto auto 50%;
-  width: 29%;
+  z-index: 4;
+  width: 27%;
   aspect-ratio: 1;
+  border: clamp(0.15rem, 0.34vw, 0.23rem) solid rgba(97, 49, 18, 0.9);
   content: "";
-  background: #17100a;
+  background:
+    linear-gradient(145deg, rgba(255, 226, 159, 0.08), transparent 42%),
+    #15110c;
   box-shadow:
-    inset 0 0.18rem 0.3rem rgba(255, 229, 180, 0.22),
-    0 0 0 1px rgba(80, 43, 20, 0.75);
+    inset 0.08rem 0.08rem 0.2rem rgba(255, 230, 168, 0.18),
+    inset -0.12rem -0.14rem 0.25rem rgba(0, 0, 0, 0.68),
+    0 0 0 clamp(0.12rem, 0.28vw, 0.2rem) rgba(223, 154, 65, 0.34);
   transform: translate(-50%, -50%);
 }
 
 .fallbackCoin::after {
   position: absolute;
-  inset: 14%;
+  inset: 10%;
+  z-index: 2;
   content: "";
-  border: 1px solid rgba(255, 222, 148, 0.3);
+  border: clamp(0.06rem, 0.16vw, 0.11rem) solid rgba(255, 219, 141, 0.35);
   border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgba(75, 39, 18, 0.36);
+  box-shadow:
+    inset 0 0 0 clamp(0.1rem, 0.24vw, 0.16rem) rgba(77, 36, 14, 0.34),
+    inset 0 0 1.1rem rgba(255, 227, 158, 0.12);
+}
+
+.fallbackCoinGlyph,
+.fallbackCoinMint {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.fallbackCoinGlyph {
+  color: rgba(60, 27, 9, 0.9);
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+  font-size: clamp(1.05rem, 2.1vw, 1.56rem);
+  font-weight: 800;
+  line-height: 1;
+  text-shadow:
+    0 1px 0 rgba(255, 223, 148, 0.24),
+    0 -1px 0 rgba(19, 8, 3, 0.2);
+}
+
+.fallbackCoinGlyphTop {
+  top: 12%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.fallbackCoinGlyphBottom {
+  bottom: 12%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.fallbackCoinGlyphRight {
+  top: 50%;
+  right: 13%;
+  transform: translateY(-50%);
+}
+
+.fallbackCoinGlyphLeft {
+  top: 50%;
+  left: 13%;
+  transform: translateY(-50%);
 }
 
 .fallbackCoin[data-face="tails"] {
-  border-color: #6e7955;
+  border-color: #354d3d;
   background:
-    radial-gradient(circle at 32% 30%, rgba(230, 221, 171, 0.42), transparent 0.72rem),
-    radial-gradient(circle at 68% 66%, rgba(127, 169, 132, 0.48), transparent 1.18rem),
-    linear-gradient(145deg, #9c7b42 0%, #6c724f 48%, #273a31 100%);
+    radial-gradient(circle at 50% 50%, transparent 0 15.8%, rgba(16, 34, 27, 0.82) 16.2% 19%, transparent 19.6%),
+    radial-gradient(circle at 50% 50%, transparent 0 64%, rgba(137, 170, 116, 0.28) 64.6% 70%, rgba(14, 38, 31, 0.52) 71% 74%, transparent 75%),
+    radial-gradient(circle at 32% 30%, rgba(222, 200, 136, 0.36), transparent 19%),
+    radial-gradient(circle at 70% 68%, rgba(94, 157, 122, 0.42), transparent 27%),
+    conic-gradient(from 34deg, #15261f, #79683c, #3f694f, #14251e, #9b713a, #15261f);
+  box-shadow:
+    inset 0 0 0 clamp(0.28rem, 0.7vw, 0.45rem) rgba(130, 157, 104, 0.22),
+    inset 0 0 0 clamp(0.52rem, 1.05vw, 0.72rem) rgba(13, 39, 31, 0.56),
+    inset 0 0.5rem 0.85rem rgba(226, 206, 143, 0.16),
+    inset 0 -0.8rem 1rem rgba(5, 18, 14, 0.62),
+    0 0.38rem 0 #17281f,
+    0 1.8rem 2.5rem rgba(0, 0, 0, 0.42);
+}
+
+.fallbackCoin[data-face="tails"]::before {
+  border-color: rgba(18, 45, 35, 0.95);
+  background:
+    linear-gradient(145deg, rgba(159, 194, 136, 0.1), transparent 42%),
+    #0e1a15;
+  box-shadow:
+    inset 0.08rem 0.08rem 0.2rem rgba(202, 214, 149, 0.13),
+    inset -0.12rem -0.14rem 0.25rem rgba(0, 0, 0, 0.7),
+    0 0 0 clamp(0.12rem, 0.28vw, 0.2rem) rgba(118, 151, 103, 0.28);
+}
+
+.fallbackCoin[data-face="tails"]::after {
+  border-color: rgba(149, 179, 120, 0.28);
+  box-shadow:
+    inset 0 0 0 clamp(0.1rem, 0.24vw, 0.16rem) rgba(11, 35, 28, 0.46),
+    inset 0 0 1.1rem rgba(142, 177, 121, 0.1);
+}
+
+.fallbackCoinMint {
+  top: 27%;
+  width: clamp(0.25rem, 0.58vw, 0.38rem);
+  height: 46%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #142d25, #9a7b42 48%, #18382d);
+  box-shadow:
+    inset 1px 0 rgba(205, 216, 151, 0.26),
+    0 0 0.25rem rgba(8, 24, 18, 0.34);
+}
+
+.fallbackCoinMint::before,
+.fallbackCoinMint::after {
+  position: absolute;
+  left: 50%;
+  width: 190%;
+  height: clamp(0.14rem, 0.34vw, 0.22rem);
+  border-radius: 999px;
+  content: "";
+  background: rgba(22, 54, 43, 0.82);
+  transform: translateX(-50%) rotate(24deg);
+}
+
+.fallbackCoinMint::before {
+  top: 27%;
+}
+
+.fallbackCoinMint::after {
+  bottom: 22%;
+  transform: translateX(-50%) rotate(-28deg);
+}
+
+.fallbackCoinMintLeft {
+  left: 32%;
+  transform: rotate(-9deg);
+}
+
+.fallbackCoinMintRight {
+  right: 32%;
+  transform: rotate(9deg);
 }
 
 .coinInteractionSurface {

@@ -85,6 +85,14 @@ describe('TabletopScene', () => {
 
     expect(document.querySelector('.tabletopCanvas canvas')).not.toBeInTheDocument();
     expect(document.querySelectorAll('.fallbackCoin')).toHaveLength(3);
+    expect(document.querySelectorAll('.fallbackCoin[data-face="heads"]')).toHaveLength(2);
+    expect(document.querySelectorAll('.fallbackCoin[data-face="tails"]')).toHaveLength(1);
+    expect(document.querySelectorAll('.fallbackCoin[data-face="heads"] .fallbackCoinGlyph')).toHaveLength(8);
+    expect(document.querySelectorAll('.fallbackCoin[data-face="tails"] .fallbackCoinMint')).toHaveLength(2);
+    expect(screen.getAllByText('乾')).toHaveLength(2);
+    expect(screen.getAllByText('隆')).toHaveLength(2);
+    expect(screen.getAllByText('通')).toHaveLength(2);
+    expect(screen.getAllByText('宝')).toHaveLength(2);
 
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
@@ -112,7 +120,7 @@ describe('TabletopScene', () => {
     );
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(300);
+      await vi.advanceTimersByTimeAsync(1700);
     });
 
     rerender(
@@ -127,7 +135,7 @@ describe('TabletopScene', () => {
     );
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(20);
+      await vi.advanceTimersByTimeAsync(520);
     });
 
     expect(firstSettled).not.toHaveBeenCalled();
