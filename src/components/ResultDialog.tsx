@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import type { AiReadingStatus } from '../ai/aiStatus';
 import type { AiInterpretation, CastingResult, CoinToss } from '../domain/types';
 import HexagramFacts from './HexagramFacts';
@@ -97,7 +97,43 @@ export function ResultDialog({
   onEditAiSettings
 }: ResultDialogProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('ai');
+  const tabRefs = useRef<Record<ResultTab, HTMLButtonElement | null>>({
+    ai: null,
+    summary: null,
+    process: null,
+    basis: null
+  });
   const hasAiError = aiStatus?.state === 'error';
+
+  const activateTab = (nextTab: ResultTab, shouldFocus = false) => {
+    setActiveTab(nextTab);
+
+    if (shouldFocus) {
+      tabRefs.current[nextTab]?.focus();
+    }
+  };
+
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, tab: ResultTab) => {
+    const currentIndex = tabs.findIndex((item) => item.id === tab);
+    let nextIndex: number | null = null;
+
+    if (event.key === 'ArrowRight') {
+      nextIndex = (currentIndex + 1) % tabs.length;
+    } else if (event.key === 'ArrowLeft') {
+      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = tabs.length - 1;
+    }
+
+    if (nextIndex === null) {
+      return;
+    }
+
+    event.preventDefault();
+    activateTab(tabs[nextIndex].id, true);
+  };
 
   return (
     <ModalLayer
@@ -129,12 +165,17 @@ export function ResultDialog({
           <button
             key={tab.id}
             id={getTabId(tab.id)}
+            ref={(element) => {
+              tabRefs.current[tab.id] = element;
+            }}
             type="button"
             role="tab"
             aria-selected={activeTab === tab.id}
             aria-controls={getPanelId(tab.id)}
+            tabIndex={activeTab === tab.id ? 0 : -1}
             className={activeTab === tab.id ? 'activeTab' : undefined}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => activateTab(tab.id)}
+            onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
           >
             {tab.label}
           </button>

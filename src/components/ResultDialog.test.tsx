@@ -85,8 +85,12 @@ describe('ResultDialog', () => {
     expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
     const aiTab = within(dialog).getByRole('tab', { name: 'AI 解读' });
     expect(aiTab).toHaveAttribute('aria-selected', 'true');
+    expect(aiTab).toHaveAttribute('tabIndex', '0');
     expect(aiTab).toHaveAttribute('id', 'result-tab-ai');
     expect(aiTab).toHaveAttribute('aria-controls', 'result-panel-ai');
+    const summaryTab = within(dialog).getByRole('tab', { name: '原始卦象' });
+    expect(summaryTab).toHaveAttribute('aria-selected', 'false');
+    expect(summaryTab).toHaveAttribute('tabIndex', '-1');
     let visiblePanel = getVisibleTabPanel();
     expect(visiblePanel).toHaveAttribute('id', 'result-panel-ai');
     expect(visiblePanel).toHaveAttribute('aria-labelledby', 'result-tab-ai');
@@ -94,8 +98,8 @@ describe('ResultDialog', () => {
     expect(within(visiblePanel).getByText('先确认边界')).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole('tab', { name: '原始卦象' }));
-    const summaryTab = within(dialog).getByRole('tab', { name: '原始卦象' });
     expect(summaryTab).toHaveAttribute('aria-selected', 'true');
+    expect(summaryTab).toHaveAttribute('tabIndex', '0');
     expect(summaryTab).toHaveAttribute('id', 'result-tab-summary');
     expect(summaryTab).toHaveAttribute('aria-controls', 'result-panel-summary');
     visiblePanel = getVisibleTabPanel();
@@ -141,6 +145,43 @@ describe('ResultDialog', () => {
       expect(controlsId).toBeTruthy();
       expect(document.getElementById(controlsId as string)).toBeInTheDocument();
     }
+  });
+
+  it('moves selection and focus with tab keyboard navigation', async () => {
+    const user = userEvent.setup();
+    renderResultDialog();
+
+    const dialog = screen.getByRole('dialog', { name: 'AI 解读' });
+    const aiTab = within(dialog).getByRole('tab', { name: 'AI 解读' });
+    const summaryTab = within(dialog).getByRole('tab', { name: '原始卦象' });
+    const basisTab = within(dialog).getByRole('tab', { name: '传统依据' });
+
+    aiTab.focus();
+    expect(aiTab).toHaveFocus();
+
+    await user.keyboard('{ArrowRight}');
+    expect(summaryTab).toHaveAttribute('aria-selected', 'true');
+    expect(summaryTab).toHaveAttribute('tabIndex', '0');
+    expect(summaryTab).toHaveFocus();
+    expect(within(getVisibleTabPanel()).getByText('泽天夬')).toBeInTheDocument();
+
+    await user.keyboard('{End}');
+    expect(basisTab).toHaveAttribute('aria-selected', 'true');
+    expect(basisTab).toHaveAttribute('tabIndex', '0');
+    expect(basisTab).toHaveFocus();
+    expect(within(getVisibleTabPanel()).getByText(/本卦卦辞：夬。扬于王庭/)).toBeInTheDocument();
+
+    await user.keyboard('{Home}');
+    expect(aiTab).toHaveAttribute('aria-selected', 'true');
+    expect(aiTab).toHaveAttribute('tabIndex', '0');
+    expect(aiTab).toHaveFocus();
+    expect(within(getVisibleTabPanel()).getByRole('heading', { name: 'AI：明断但不冒进' })).toBeInTheDocument();
+
+    await user.keyboard('{ArrowLeft}');
+    expect(basisTab).toHaveAttribute('aria-selected', 'true');
+    expect(basisTab).toHaveAttribute('tabIndex', '0');
+    expect(basisTab).toHaveFocus();
+    expect(within(getVisibleTabPanel()).getByText(/本卦卦辞：夬。扬于王庭/)).toBeInTheDocument();
   });
 
   it('renders stable casting facts without changed hexagram or moving lines', async () => {
