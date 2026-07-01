@@ -13,6 +13,7 @@ export interface CastingSession {
   castingResult: CastingResult | null;
   currentThrow: number;
   start: (question: string, questionType: QuestionType) => void;
+  recordToss: (toss: CoinToss) => void;
   addRandomToss: () => void;
   addManualToss: (bits: readonly boolean[]) => void;
   reset: () => void;
@@ -89,9 +90,13 @@ export function useCastingSession(): CastingSession {
     dispatch({ type: 'start', question, questionType });
   }, []);
 
-  const addRandomToss = useCallback(() => {
-    dispatch({ type: 'addToss', toss: tossCoins() });
+  const recordToss = useCallback((toss: CoinToss) => {
+    dispatch({ type: 'addToss', toss });
   }, []);
+
+  const addRandomToss = useCallback(() => {
+    recordToss(tossCoins());
+  }, [recordToss]);
 
   const addManualToss = useCallback((bits: readonly boolean[]) => {
     dispatch({ type: 'addToss', toss: tossCoinsWithBits(bits) });
@@ -110,10 +115,11 @@ export function useCastingSession(): CastingSession {
       castingResult: state.castingResult,
       currentThrow: Math.min(state.tosses.length + 1, 6),
       start,
+      recordToss,
       addRandomToss,
       addManualToss,
       reset
     }),
-    [addManualToss, addRandomToss, reset, start, state]
+    [addManualToss, addRandomToss, recordToss, reset, start, state]
   );
 }

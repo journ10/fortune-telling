@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
+import { createCoinToss } from '../domain/coinToss';
 import { useCastingSession } from './useCastingSession';
 
 describe('useCastingSession', () => {
@@ -18,6 +19,20 @@ describe('useCastingSession', () => {
     expect(result.current.phase).toBe('result');
     expect(result.current.tosses).toHaveLength(6);
     expect(result.current.castingResult?.question).toBe('今日运势');
+  });
+
+  it('records a predetermined toss so animation can settle before committing the line', () => {
+    const { result } = renderHook(() => useCastingSession());
+    const toss = createCoinToss(['heads', 'heads', 'tails']);
+
+    act(() => {
+      result.current.start('今日运势', 'general');
+      result.current.recordToss(toss);
+    });
+
+    expect(result.current.phase).toBe('casting');
+    expect(result.current.tosses).toEqual([toss]);
+    expect(result.current.currentThrow).toBe(2);
   });
 
   it('resets to question entry', () => {
