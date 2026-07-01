@@ -61,6 +61,12 @@ function renderResultDialog({
   return fixture;
 }
 
+function getVisibleTabPanel(): HTMLElement {
+  const visiblePanels = screen.getAllByRole('tabpanel');
+  expect(visiblePanels).toHaveLength(1);
+  return visiblePanels[0];
+}
+
 describe('ResultDialog', () => {
   it('renders a successful AI result with traceable raw hexagram tabs', async () => {
     const user = userEvent.setup();
@@ -75,35 +81,37 @@ describe('ResultDialog', () => {
     const dialog = screen.getByRole('dialog', { name: 'AI 解读' });
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByText('AI 解卦已生成；传统卦辞与爻辞未被改写。')).toBeInTheDocument();
-    expect(within(dialog).getByRole('heading', { name: 'AI：明断但不冒进' })).toBeInTheDocument();
-    expect(within(dialog).getByText('先确认边界')).toBeInTheDocument();
+    expect(screen.getAllByRole('tabpanel', { hidden: true })).toHaveLength(4);
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
     const aiTab = within(dialog).getByRole('tab', { name: 'AI 解读' });
+    expect(aiTab).toHaveAttribute('aria-selected', 'true');
     expect(aiTab).toHaveAttribute('id', 'result-tab-ai');
     expect(aiTab).toHaveAttribute('aria-controls', 'result-panel-ai');
-    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute('id', 'result-panel-ai');
-    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
-      'aria-labelledby',
-      'result-tab-ai'
-    );
+    let visiblePanel = getVisibleTabPanel();
+    expect(visiblePanel).toHaveAttribute('id', 'result-panel-ai');
+    expect(visiblePanel).toHaveAttribute('aria-labelledby', 'result-tab-ai');
+    expect(within(visiblePanel).getByRole('heading', { name: 'AI：明断但不冒进' })).toBeInTheDocument();
+    expect(within(visiblePanel).getByText('先确认边界')).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole('tab', { name: '原始卦象' }));
     const summaryTab = within(dialog).getByRole('tab', { name: '原始卦象' });
+    expect(summaryTab).toHaveAttribute('aria-selected', 'true');
     expect(summaryTab).toHaveAttribute('id', 'result-tab-summary');
     expect(summaryTab).toHaveAttribute('aria-controls', 'result-panel-summary');
-    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute('id', 'result-panel-summary');
-    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
-      'aria-labelledby',
-      'result-tab-summary'
-    );
-    expect(within(dialog).getByText('泽天夬')).toBeInTheDocument();
-    expect(within(dialog).getByText('兑为泽')).toBeInTheDocument();
-    expect(within(dialog).getByText('九三')).toBeInTheDocument();
+    visiblePanel = getVisibleTabPanel();
+    expect(visiblePanel).toHaveAttribute('id', 'result-panel-summary');
+    expect(visiblePanel).toHaveAttribute('aria-labelledby', 'result-tab-summary');
+    expect(within(visiblePanel).getByText('泽天夬')).toBeInTheDocument();
+    expect(within(visiblePanel).getByText('兑为泽')).toBeInTheDocument();
+    expect(within(visiblePanel).getByText('九三')).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole('tab', { name: '起卦过程' }));
-    expect(within(dialog).getAllByText(/第 \d 掷/)).toHaveLength(6);
+    visiblePanel = getVisibleTabPanel();
+    expect(within(visiblePanel).getAllByText(/第 \d 掷/)).toHaveLength(6);
 
     await user.click(within(dialog).getByRole('tab', { name: '传统依据' }));
-    expect(within(dialog).getByText(/本卦卦辞：夬。扬于王庭/)).toBeInTheDocument();
+    visiblePanel = getVisibleTabPanel();
+    expect(within(visiblePanel).getByText(/本卦卦辞：夬。扬于王庭/)).toBeInTheDocument();
   });
 
   it('renders AI failure actions without local reading sections', () => {
@@ -156,8 +164,9 @@ describe('ResultDialog', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'AI 解读' });
     await user.click(within(dialog).getByRole('tab', { name: '原始卦象' }));
+    const visiblePanel = getVisibleTabPanel();
 
-    expect(within(dialog).getByText('无变卦')).toBeInTheDocument();
-    expect(within(dialog).getByText('无动爻')).toBeInTheDocument();
+    expect(within(visiblePanel).getByText('无变卦')).toBeInTheDocument();
+    expect(within(visiblePanel).getByText('无动爻')).toBeInTheDocument();
   });
 });
