@@ -1,7 +1,80 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+
+async function saveAiSettings(
+  user: ReturnType<typeof userEvent.setup>,
+  {
+    provider,
+    apiUrl,
+    apiKey = 'sk-user',
+    model
+  }: {
+    provider?: 'openai' | 'anthropic' | 'deepseek';
+    apiUrl?: string;
+    apiKey?: string;
+    model?: string;
+  } = {}
+) {
+  if (provider) {
+    await user.selectOptions(screen.getByLabelText('Provider'), provider);
+  }
+
+  if (apiUrl !== undefined) {
+    await user.clear(screen.getByLabelText('API URL'));
+    await user.type(screen.getByLabelText('API URL'), apiUrl);
+  }
+
+  await user.clear(screen.getByLabelText('API Key'));
+  await user.type(screen.getByLabelText('API Key'), apiKey);
+
+  if (model !== undefined) {
+    await user.clear(screen.getByLabelText('模型'));
+    await user.type(screen.getByLabelText('模型'), model);
+  }
+
+  await user.click(screen.getByRole('button', { name: '保存配置' }));
+}
+
+async function startCastingWithDefaultQuestion(user: ReturnType<typeof userEvent.setup>) {
+  expect(await screen.findByRole('dialog', { name: '所问之事' })).toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: '今日运势' }));
+  expect(screen.getByRole('textbox', { name: '所问之事' })).toHaveValue('今日运势');
+
+  await user.click(screen.getByRole('button', { name: '开始起卦' }));
+}
+
+async function settleOneToss(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: '投掷铜钱' }));
+
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeDisabled();
+  });
+
+  await waitFor(
+    () => {
+      expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeEnabled();
+    },
+    { timeout: 1000 }
+  );
+}
+
+async function settleSixTosses(user: ReturnType<typeof userEvent.setup>) {
+  for (let index = 0; index < 5; index += 1) {
+    await settleOneToss(user);
+  }
+
+  await user.click(screen.getByRole('button', { name: '投掷铜钱' }));
+
+  await waitFor(
+    () => {
+      expect(screen.getByRole('button', { name: '查看结果' })).toBeEnabled();
+    },
+    { timeout: 1000 }
+  );
+}
 
 describe('App', () => {
   beforeEach(() => {
@@ -25,23 +98,35 @@ describe('App', () => {
       configurable: true,
       value: storageMock
     });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
   });
 
-  it('requires AI settings before casting starts', async () => {
-    const user = userEvent.setup();
+  it('opens with the AI settings dialog when API settings are missing', () => {
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
+
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '最近事业' }));
-    expect(screen.getByRole('textbox', { name: '所问之事' })).toHaveValue('最近事业怎么推进？');
-
-    await user.click(screen.getByRole('button', { name: '今日运势' }));
-    expect(screen.getByRole('button', { name: '配置 AI 后起卦' })).toBeDisabled();
-    expect(screen.getByText(/AI 解卦为必填/)).toBeInTheDocument();
-
-    expect(screen.queryByText(/MediaPipe CDN/)).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'AI 配置' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeInTheDocument();
+    expect(screen.queryByText('三钱成卦')).not.toBeInTheDocument();
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('collects AI settings and question through floating dialogs before tabletop casting', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn());
+
+    render(<App />);
+
+    await saveAiSettings(user, { apiKey: 'sk-user' });
+    await startCastingWithDefaultQuestion(user);
+
+    expect(screen.queryByRole('dialog', { name: '所问之事' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('第 1 掷 / 共 6 掷');
+    expect(screen.queryByText('AI Provider')).not.toBeInTheDocument();
   });
 
   it('uses the user provided OpenAI settings for a Chat Completions AI reading', async () => {
@@ -65,20 +150,17 @@ describe('App', () => {
       text: async () => ''
     }));
     vi.stubGlobal('fetch', fetcher);
+
     render(<App />);
 
     expect(screen.getByLabelText('Provider')).toHaveValue('openai');
-    await user.clear(screen.getByLabelText('API URL'));
-    await user.type(screen.getByLabelText('API URL'), 'https://gateway.example/openai/chat/completions');
-    await user.type(screen.getByLabelText('API Key'), 'sk-user');
-    await user.clear(screen.getByLabelText('模型'));
-    await user.type(screen.getByLabelText('模型'), 'gpt-4o-mini');
-    await user.click(screen.getByRole('button', { name: '今日运势' }));
-    await user.click(screen.getByRole('button', { name: '开始起卦' }));
-
-    for (let index = 0; index < 6; index += 1) {
-      await user.click(screen.getByRole('button', { name: '手动掷一次' }));
-    }
+    await saveAiSettings(user, {
+      apiUrl: 'https://gateway.example/openai/chat/completions',
+      apiKey: 'sk-user',
+      model: 'gpt-4o-mini'
+    });
+    await startCastingWithDefaultQuestion(user);
+    await settleSixTosses(user);
 
     expect(await screen.findByRole('heading', { name: 'AI：守正而后动' })).toBeInTheDocument();
     expect(screen.getByText(/AI 解卦已生成/)).toBeInTheDocument();
@@ -115,18 +197,15 @@ describe('App', () => {
       text: async () => ''
     }));
     vi.stubGlobal('fetch', fetcher);
+
     render(<App />);
 
     await user.selectOptions(screen.getByLabelText('Provider'), 'anthropic');
     expect(screen.getByLabelText('API URL')).toHaveValue('https://api.anthropic.com/v1/messages');
     expect(screen.getByLabelText('模型')).toHaveValue('claude-sonnet-4-6');
-    await user.type(screen.getByLabelText('API Key'), 'sk-ant-user');
-    await user.click(screen.getByRole('button', { name: '今日运势' }));
-    await user.click(screen.getByRole('button', { name: '开始起卦' }));
-
-    for (let index = 0; index < 6; index += 1) {
-      await user.click(screen.getByRole('button', { name: '手动掷一次' }));
-    }
+    await saveAiSettings(user, { apiKey: 'sk-ant-user' });
+    await startCastingWithDefaultQuestion(user);
+    await settleSixTosses(user);
 
     expect(await screen.findByRole('heading', { name: 'Claude：变中求稳' })).toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledWith(
@@ -166,18 +245,15 @@ describe('App', () => {
       };
     });
     vi.stubGlobal('fetch', fetcher);
+
     render(<App />);
 
     await user.selectOptions(screen.getByLabelText('Provider'), 'deepseek');
     expect(screen.getByLabelText('API URL')).toHaveValue('https://api.deepseek.com');
     expect(screen.getByLabelText('模型')).toHaveValue('deepseek-v4-flash');
-    await user.type(screen.getByLabelText('API Key'), 'sk-deepseek-user');
-    await user.click(screen.getByRole('button', { name: '今日运势' }));
-    await user.click(screen.getByRole('button', { name: '开始起卦' }));
-
-    for (let index = 0; index < 6; index += 1) {
-      await user.click(screen.getByRole('button', { name: '手动掷一次' }));
-    }
+    await saveAiSettings(user, { apiKey: 'sk-deepseek-user' });
+    await startCastingWithDefaultQuestion(user);
+    await settleSixTosses(user);
 
     expect(await screen.findByRole('heading', { name: 'DeepSeek：顺势而断' })).toBeInTheDocument();
     const request = JSON.parse(fetchCalls[0][1]?.body as string);
@@ -202,21 +278,64 @@ describe('App', () => {
       text: async () => JSON.stringify({ error: { message: 'model not found' } })
     }));
     vi.stubGlobal('fetch', fetcher);
+
     render(<App />);
 
-    await user.type(screen.getByLabelText('API Key'), 'sk-user');
-    await user.click(screen.getByRole('button', { name: '今日运势' }));
-    await user.click(screen.getByRole('button', { name: '开始起卦' }));
-
-    for (let index = 0; index < 6; index += 1) {
-      await user.click(screen.getByRole('button', { name: '手动掷一次' }));
-    }
+    await saveAiSettings(user, { apiKey: 'sk-user' });
+    await startCastingWithDefaultQuestion(user);
+    await settleSixTosses(user);
 
     expect(await screen.findByText('AI 解卦失败：model not found')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /卦象结果/ })).toBeInTheDocument();
-    expect(screen.getByText('传统依据')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'AI 解读' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'AI 解卦未生成' })).toBeInTheDocument();
     expect(screen.queryByText('白话解读')).not.toBeInTheDocument();
     expect(screen.queryByText('行动建议')).not.toBeInTheDocument();
-    expect(screen.queryByText(/已回退/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '修改 AI 配置' })).toBeInTheDocument();
+  });
+
+  it('returns to the completed result and retries AI after editing settings from an error', async () => {
+    const user = userEvent.setup();
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+        text: async () => JSON.stringify({ error: { message: 'model not found' } })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  headline: 'AI：重试成功',
+                  plainText: '更新配置后，AI 重新生成了解读。',
+                  advice: ['确认配置', '保持问题边界', '再行动']
+                })
+              }
+            }
+          ]
+        }),
+        text: async () => ''
+      });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<App />);
+
+    await saveAiSettings(user, { apiKey: 'sk-user' });
+    await startCastingWithDefaultQuestion(user);
+    await settleSixTosses(user);
+    expect(await screen.findByText('AI 解卦失败：model not found')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '修改 AI 配置' }));
+    expect(screen.getByRole('dialog', { name: 'AI 配置' })).toBeInTheDocument();
+    await saveAiSettings(user, { apiKey: 'sk-user-2' });
+
+    expect(screen.queryByRole('dialog', { name: '所问之事' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'AI：重试成功' })).toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });
