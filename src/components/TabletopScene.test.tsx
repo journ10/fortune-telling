@@ -2,8 +2,13 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { createCoinToss } from '../domain/coinToss';
+import type { CoinFace } from '../domain/types';
 import type { CoinToss } from '../domain/types';
-import TabletopScene from './TabletopScene';
+import TabletopScene, {
+  MIN_COIN_LANDING_DISTANCE,
+  TABLETOP_COIN_RADIUS,
+  createCoinAnimationPlans
+} from './TabletopScene';
 
 interface RenderTabletopSceneOptions {
   currentThrow?: number;
@@ -46,6 +51,37 @@ afterEach(() => {
 });
 
 describe('TabletopScene', () => {
+  it('uses a restrained traditional coin scale', () => {
+    expect(TABLETOP_COIN_RADIUS).toBeGreaterThanOrEqual(0.46);
+    expect(TABLETOP_COIN_RADIUS).toBeLessThanOrEqual(0.52);
+  });
+
+  it('keeps generated coin resting points from overlapping', () => {
+    const faceSets: CoinFace[][] = [
+      ['heads', 'heads', 'heads'],
+      ['heads', 'tails', 'heads'],
+      ['tails', 'heads', 'tails'],
+      ['tails', 'tails', 'tails']
+    ];
+
+    for (let currentThrow = 1; currentThrow <= 6; currentThrow += 1) {
+      faceSets.forEach((faces) => {
+        const plans = createCoinAnimationPlans(currentThrow, faces);
+
+        plans.forEach((plan, index) => {
+          plans.slice(index + 1).forEach((otherPlan) => {
+            const distance = Math.hypot(
+              plan.landingX + plan.slideX - otherPlan.landingX - otherPlan.slideX,
+              plan.landingZ + plan.slideZ - otherPlan.landingZ - otherPlan.slideZ
+            );
+
+            expect(distance).toBeGreaterThanOrEqual(MIN_COIN_LANDING_DISTANCE);
+          });
+        });
+      });
+    }
+  });
+
   it('renders the coin interaction without question or AI copy', async () => {
     const user = userEvent.setup();
     const onTossRequest = vi.fn();

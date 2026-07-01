@@ -18,10 +18,13 @@ const SETTLED_HOLD_MS = 520;
 const SETTLE_CALLBACK_DELAY_MS = SETTLE_DELAY_MS + SETTLED_HOLD_MS;
 const SCENE_WIDTH = 720;
 const SCENE_HEIGHT = 480;
-const COIN_RADIUS = 0.62;
-const COIN_THICKNESS = 0.12;
+export const TABLETOP_COIN_RADIUS = 0.5;
+const COIN_RADIUS = TABLETOP_COIN_RADIUS;
+const COIN_THICKNESS = 0.082;
 const COIN_REST_Y = COIN_THICKNESS / 2 + 0.018;
 const FACE_TEXTURE_SIZE = 512;
+export const MIN_COIN_LANDING_DISTANCE = TABLETOP_COIN_RADIUS * 2.08;
+const COIN_LANDING_SEPARATION_MARGIN = 0.012;
 
 interface CoinAnimationPlan {
   hoverX: number;
@@ -129,11 +132,11 @@ function createCoinAnimationPlan(
   const direction = random() > 0.5 ? 1 : -1;
 
   return {
-    hoverX: side * 1.28 + (random() - 0.5) * 0.08,
-    hoverY: 1.16 + index * 0.08 + random() * 0.08,
+    hoverX: side * 1.08 + (random() - 0.5) * 0.08,
+    hoverY: 1.06 + index * 0.07 + random() * 0.07,
     hoverZ: -0.28 + side * 0.08 + (random() - 0.5) * 0.14,
-    landingX: side * 0.9 + (random() - 0.5) * 0.42,
-    landingZ: (random() - 0.5) * 1.12,
+    landingX: side * 0.78 + (random() - 0.5) * 0.34,
+    landingZ: (random() - 0.5) * 0.96,
     curveX: direction * (0.28 + random() * 0.34),
     curveZ: (random() - 0.5) * 0.52,
     slideX: direction * (0.1 + random() * 0.18),
@@ -146,6 +149,62 @@ function createCoinAnimationPlan(
     finalRotationZ: (random() - 0.5) * Math.PI * 0.55,
     phase: random() * Math.PI * 2
   };
+}
+
+export function createCoinAnimationPlans(
+  currentThrow: number,
+  faces: readonly CoinFace[]
+): CoinAnimationPlan[] {
+  const plans = faces.map((face, index) =>
+    createCoinAnimationPlan(currentThrow, faces, index, face)
+  );
+
+  for (let iteration = 0; iteration < 8; iteration += 1) {
+    let changed = false;
+
+    for (let index = 0; index < plans.length; index += 1) {
+      for (let otherIndex = index + 1; otherIndex < plans.length; otherIndex += 1) {
+        const plan = plans[index];
+        const otherPlan = plans[otherIndex];
+        const planRestX = plan.landingX + plan.slideX;
+        const planRestZ = plan.landingZ + plan.slideZ;
+        const otherRestX = otherPlan.landingX + otherPlan.slideX;
+        const otherRestZ = otherPlan.landingZ + otherPlan.slideZ;
+        let deltaX = otherRestX - planRestX;
+        let deltaZ = otherRestZ - planRestZ;
+        let distance = Math.hypot(deltaX, deltaZ);
+
+        const targetDistance = MIN_COIN_LANDING_DISTANCE + COIN_LANDING_SEPARATION_MARGIN;
+
+        if (distance >= targetDistance) {
+          continue;
+        }
+
+        if (distance < 0.001) {
+          const angle = (index + otherIndex + currentThrow) * 1.91;
+          deltaX = Math.cos(angle);
+          deltaZ = Math.sin(angle);
+          distance = 1;
+        }
+
+        const normalX = deltaX / distance;
+        const normalZ = deltaZ / distance;
+        const separation = (targetDistance - distance) / 2;
+
+        plan.landingX -= normalX * separation;
+        plan.landingZ -= normalZ * separation;
+        otherPlan.landingX += normalX * separation;
+        otherPlan.landingZ += normalZ * separation;
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      break;
+    }
+  }
+
+  return plans;
 }
 
 function createPendingTossKey(currentThrow: number, pendingToss: CoinToss | null): string | null {
@@ -308,15 +367,15 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
 
   const copper = context.createRadialGradient(center * 0.72, center * 0.68, 18, center, center, coinRadius);
   if (face === 'heads') {
-    copper.addColorStop(0, '#f0bf68');
-    copper.addColorStop(0.46, '#b77431');
-    copper.addColorStop(0.78, '#72401d');
-    copper.addColorStop(1, '#2d1a11');
+    copper.addColorStop(0, '#c98f46');
+    copper.addColorStop(0.46, '#936026');
+    copper.addColorStop(0.78, '#573017');
+    copper.addColorStop(1, '#26160d');
   } else {
-    copper.addColorStop(0, '#a68147');
-    copper.addColorStop(0.42, '#686e4a');
-    copper.addColorStop(0.72, '#365644');
-    copper.addColorStop(1, '#17271f');
+    copper.addColorStop(0, '#8f7545');
+    copper.addColorStop(0.42, '#5a5d3e');
+    copper.addColorStop(0.72, '#314b3d');
+    copper.addColorStop(1, '#17231d');
   }
 
   context.fillStyle = copper;
@@ -324,19 +383,19 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
   context.arc(center, center, coinRadius, 0, Math.PI * 2);
   context.fill();
 
-  for (let speck = 0; speck < 260; speck += 1) {
+  for (let speck = 0; speck < 380; speck += 1) {
     const angle = random() * Math.PI * 2;
     const distance = Math.sqrt(random()) * coinRadius * 0.95;
     const x = center + Math.cos(angle) * distance;
     const y = center + Math.sin(angle) * distance;
-    const size = 0.7 + random() * 3.1;
+    const size = 0.5 + random() * 2.6;
 
     context.fillStyle =
       face === 'heads'
-        ? `rgba(${155 + random() * 70}, ${88 + random() * 55}, ${33 + random() * 35}, ${0.08 + random() * 0.18})`
+        ? `rgba(${90 + random() * 95}, ${54 + random() * 60}, ${25 + random() * 38}, ${0.1 + random() * 0.22})`
         : random() > 0.45
-          ? `rgba(${70 + random() * 55}, ${134 + random() * 70}, ${104 + random() * 62}, ${0.12 + random() * 0.24})`
-          : `rgba(${48 + random() * 42}, ${32 + random() * 38}, ${19 + random() * 24}, ${0.12 + random() * 0.22})`;
+          ? `rgba(${47 + random() * 50}, ${98 + random() * 62}, ${82 + random() * 48}, ${0.1 + random() * 0.2})`
+          : `rgba(${30 + random() * 45}, ${24 + random() * 32}, ${16 + random() * 24}, ${0.14 + random() * 0.24})`;
 
     context.beginPath();
     context.arc(x, y, size, 0, Math.PI * 2);
@@ -345,33 +404,37 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
 
   context.lineCap = 'round';
   context.lineJoin = 'round';
-  context.strokeStyle = face === 'heads' ? 'rgba(253, 216, 139, 0.58)' : 'rgba(168, 190, 146, 0.42)';
-  context.lineWidth = 18;
+  context.strokeStyle = face === 'heads' ? 'rgba(190, 130, 60, 0.66)' : 'rgba(104, 136, 103, 0.46)';
+  context.lineWidth = 14;
   context.beginPath();
   context.arc(center, center, coinRadius * 0.86, 0, Math.PI * 2);
   context.stroke();
 
-  context.strokeStyle = face === 'heads' ? 'rgba(67, 33, 14, 0.76)' : 'rgba(18, 40, 31, 0.74)';
-  context.lineWidth = 9;
+  context.strokeStyle = face === 'heads' ? 'rgba(45, 23, 12, 0.62)' : 'rgba(13, 33, 27, 0.66)';
+  context.lineWidth = 7;
   context.beginPath();
   context.arc(center, center, coinRadius * 0.78, 0, Math.PI * 2);
   context.stroke();
 
-  const squareSize = FACE_TEXTURE_SIZE * 0.215;
-  context.strokeStyle = face === 'heads' ? 'rgba(255, 225, 153, 0.66)' : 'rgba(128, 166, 119, 0.56)';
-  context.lineWidth = 17;
+  const squareSize = FACE_TEXTURE_SIZE * 0.2;
+  context.strokeStyle = face === 'heads' ? 'rgba(176, 110, 43, 0.68)' : 'rgba(80, 120, 90, 0.52)';
+  context.lineWidth = 15;
   context.strokeRect(center - squareSize / 2, center - squareSize / 2, squareSize, squareSize);
-  context.strokeStyle = face === 'heads' ? 'rgba(72, 34, 13, 0.82)' : 'rgba(15, 34, 28, 0.82)';
-  context.lineWidth = 8;
+  context.strokeStyle = face === 'heads' ? 'rgba(31, 16, 8, 0.76)' : 'rgba(9, 26, 22, 0.76)';
+  context.lineWidth = 7;
   context.strokeRect(center - squareSize / 2, center - squareSize / 2, squareSize, squareSize);
 
   if (face === 'heads') {
-    context.font = '700 74px "Songti SC", "STSong", "Noto Serif CJK SC", serif';
+    context.font = '800 68px "Songti SC", "STSong", "Noto Serif CJK SC", serif';
     context.textAlign = 'center';
     context.textBaseline = 'middle';
-    context.fillStyle = 'rgba(25, 10, 3, 0.96)';
-    context.strokeStyle = 'rgba(255, 230, 154, 0.72)';
-    context.lineWidth = 5;
+    context.fillStyle = 'rgba(38, 19, 9, 0.72)';
+    context.strokeStyle = 'rgba(179, 123, 57, 0.56)';
+    context.lineWidth = 8;
+    context.shadowColor = 'rgba(255, 208, 126, 0.2)';
+    context.shadowBlur = 2;
+    context.shadowOffsetX = -1;
+    context.shadowOffsetY = -1;
 
     [
       ['乾', center, center - 132],
@@ -382,9 +445,12 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
       context.strokeText(String(character), Number(x), Number(y));
       context.fillText(String(character), Number(x), Number(y));
     });
+    context.shadowBlur = 0;
+    context.shadowOffsetX = 0;
+    context.shadowOffsetY = 0;
   } else {
-    context.strokeStyle = 'rgba(5, 24, 19, 0.88)';
-    context.lineWidth = 17;
+    context.strokeStyle = 'rgba(9, 31, 25, 0.72)';
+    context.lineWidth = 14;
 
     [-64, 64].forEach((offset, column) => {
       context.beginPath();
@@ -405,8 +471,8 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
       context.stroke();
     });
 
-    context.strokeStyle = 'rgba(191, 218, 153, 0.62)';
-    context.lineWidth = 6;
+    context.strokeStyle = 'rgba(126, 157, 112, 0.48)';
+    context.lineWidth = 5;
     context.beginPath();
     context.arc(center, center, coinRadius * 0.55, -0.9, 0.18);
     context.stroke();
@@ -415,7 +481,7 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
     context.stroke();
   }
 
-  for (let scratch = 0; scratch < 38; scratch += 1) {
+  for (let scratch = 0; scratch < 62; scratch += 1) {
     const angle = random() * Math.PI * 2;
     const distance = Math.sqrt(random()) * coinRadius * 0.88;
     const x = center + Math.cos(angle) * distance;
@@ -425,8 +491,8 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
     context.save();
     context.translate(x, y);
     context.rotate(random() * Math.PI);
-    context.strokeStyle = random() > 0.5 ? 'rgba(255, 230, 166, 0.16)' : 'rgba(0, 0, 0, 0.18)';
-    context.lineWidth = 1 + random() * 1.5;
+    context.strokeStyle = random() > 0.5 ? 'rgba(214, 166, 94, 0.13)' : 'rgba(0, 0, 0, 0.22)';
+    context.lineWidth = 0.8 + random() * 1.2;
     context.beginPath();
     context.moveTo(-length / 2, 0);
     context.lineTo(length / 2, (random() - 0.5) * 5);
@@ -441,7 +507,7 @@ export function createCoinShape(): THREE.Shape {
   const shape = new THREE.Shape();
   shape.absarc(0, 0, COIN_RADIUS, 0, Math.PI * 2, false);
 
-  const squareHoleSize = 0.17;
+  const squareHoleSize = 0.135;
   const squareHole = new THREE.Path();
   squareHole.moveTo(-squareHoleSize, -squareHoleSize);
   squareHole.lineTo(squareHoleSize, -squareHoleSize);
@@ -545,7 +611,7 @@ export default function TabletopScene({
   const mountRef = useRef<HTMLDivElement | null>(null);
   const coinTargetsRef = useRef<number[]>(FALLBACK_FACES.map(targetRotationForFace));
   const coinPlansRef = useRef<CoinAnimationPlan[]>(
-    FALLBACK_FACES.map((face, index) => createCoinAnimationPlan(0, FALLBACK_FACES, index, face))
+    createCoinAnimationPlans(0, FALLBACK_FACES)
   );
   const tossStartedAtRef = useRef<number | null>(null);
   const settledTossKeyRef = useRef<string | null>(null);
@@ -773,9 +839,7 @@ export default function TabletopScene({
       scheduledTossKeyRef.current = null;
       settledTossKeyRef.current = null;
       coinTargetsRef.current = FALLBACK_FACES.map(targetRotationForFace);
-      coinPlansRef.current = FALLBACK_FACES.map((face, index) =>
-        createCoinAnimationPlan(currentThrow, FALLBACK_FACES, index, face)
-      );
+      coinPlansRef.current = createCoinAnimationPlans(currentThrow, FALLBACK_FACES);
       return undefined;
     }
 
@@ -789,9 +853,7 @@ export default function TabletopScene({
     scheduledTossKeyRef.current = pendingTossKey;
     tossStartedAtRef.current = getTime();
     coinTargetsRef.current = pendingToss.faces.map(targetRotationForFace);
-    coinPlansRef.current = pendingToss.faces.map((face, index) =>
-      createCoinAnimationPlan(currentThrow, pendingToss.faces, index, face)
-    );
+    coinPlansRef.current = createCoinAnimationPlans(currentThrow, pendingToss.faces);
 
     const timeoutId = window.setTimeout(() => {
       if (
