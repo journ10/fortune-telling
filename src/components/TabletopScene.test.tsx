@@ -73,6 +73,65 @@ describe('TabletopScene', () => {
     expect(onTossSettled).toHaveBeenCalledTimes(1);
   });
 
+  it('settles a rerendered pending toss once without restarting the timer', async () => {
+    vi.useFakeTimers();
+    const pendingToss = createCoinToss(['heads', 'tails', 'tails']);
+    const firstSettled = vi.fn();
+    const secondSettled = vi.fn();
+    const thirdSettled = vi.fn();
+
+    const { rerender } = render(
+      <TabletopScene
+        currentThrow={2}
+        pendingToss={pendingToss}
+        resultAvailable={false}
+        onOpenResult={vi.fn()}
+        onTossRequest={vi.fn()}
+        onTossSettled={firstSettled}
+      />
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    rerender(
+      <TabletopScene
+        currentThrow={2}
+        pendingToss={pendingToss}
+        resultAvailable={false}
+        onOpenResult={vi.fn()}
+        onTossRequest={vi.fn()}
+        onTossSettled={secondSettled}
+      />
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    expect(firstSettled).not.toHaveBeenCalled();
+    expect(secondSettled).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <TabletopScene
+        currentThrow={2}
+        pendingToss={pendingToss}
+        resultAvailable={false}
+        onOpenResult={vi.fn()}
+        onTossRequest={vi.fn()}
+        onTossSettled={thirdSettled}
+      />
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(secondSettled).toHaveBeenCalledTimes(1);
+    expect(thirdSettled).not.toHaveBeenCalled();
+  });
+
   it('opens the result when a result is available', async () => {
     const user = userEvent.setup();
     const onOpenResult = vi.fn();

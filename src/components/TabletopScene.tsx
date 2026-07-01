@@ -51,6 +51,14 @@ function targetRotationForFace(face: CoinFace): number {
   return face === 'heads' ? 0 : Math.PI;
 }
 
+function createPendingTossKey(currentThrow: number, pendingToss: CoinToss | null): string | null {
+  if (!pendingToss) {
+    return null;
+  }
+
+  return `${currentThrow}:${pendingToss.faces.join('-')}:${pendingToss.score}:${pendingToss.line.name}`;
+}
+
 function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
   if (Array.isArray(material)) {
     material.forEach((entry) => entry.dispose());
@@ -71,7 +79,15 @@ export default function TabletopScene({
   const mountRef = useRef<HTMLDivElement | null>(null);
   const coinTargetsRef = useRef<number[]>(FALLBACK_FACES.map(targetRotationForFace));
   const tossStartedAtRef = useRef<number | null>(null);
+  const settledTossKeyRef = useRef<string | null>(null);
+  const scheduledTossKeyRef = useRef<string | null>(null);
+  const onTossSettledRef = useRef(onTossSettled);
   const throwStatusId = useId();
+  const pendingTossKey = createPendingTossKey(currentThrow, pendingToss);
+
+  useEffect(() => {
+    onTossSettledRef.current = onTossSettled;
+  }, [onTossSettled]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -203,21 +219,46 @@ export default function TabletopScene({
   }, []);
 
   useEffect(() => {
-    if (!pendingToss) {
+    if (!pendingTossKey || !pendingToss) {
       tossStartedAtRef.current = null;
+      scheduledTossKeyRef.current = null;
+      settledTossKeyRef.current = null;
       return undefined;
     }
 
+    if (
+      scheduledTossKeyRef.current === pendingTossKey ||
+      settledTossKeyRef.current === pendingTossKey
+    ) {
+      return undefined;
+    }
+
+    scheduledTossKeyRef.current = pendingTossKey;
     tossStartedAtRef.current = getTime();
     coinTargetsRef.current = pendingToss.faces.map(targetRotationForFace);
 
     const timeoutId = window.setTimeout(() => {
+      if (
+        scheduledTossKeyRef.current !== pendingTossKey ||
+        settledTossKeyRef.current === pendingTossKey
+      ) {
+        return;
+      }
+
       tossStartedAtRef.current = null;
-      onTossSettled();
+      scheduledTossKeyRef.current = null;
+      settledTossKeyRef.current = pendingTossKey;
+      onTossSettledRef.current();
     }, SETTLE_DELAY_MS);
 
-    return () => window.clearTimeout(timeoutId);
-  }, [onTossSettled, pendingToss]);
+    return () => {
+      window.clearTimeout(timeoutId);
+
+      if (scheduledTossKeyRef.current === pendingTossKey) {
+        scheduledTossKeyRef.current = null;
+      }
+    };
+  }, [pendingTossKey]);
 
   const fallbackFaces = pendingToss?.faces ?? FALLBACK_FACES;
   const buttonLabel = resultAvailable ? '查看结果' : '投掷铜钱';
