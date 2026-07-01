@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 interface ModalLayerProps {
   title: string;
@@ -16,12 +16,13 @@ export default function ModalLayer({
   className
 }: ModalLayerProps) {
   const classes = ['modalPanel', className].filter(Boolean).join(' ');
+  const titleId = useId();
 
   return (
     <div className="modalOverlay" role="presentation">
-      <section className={classes} role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <section className={classes} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="modalHeader">
-          <h1 id="modal-title">{title}</h1>
+          <h1 id={titleId}>{title}</h1>
           {onClose ? (
             <button className="iconButton" type="button" aria-label="关闭" onClick={onClose}>
               ×

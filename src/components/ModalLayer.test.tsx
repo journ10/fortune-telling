@@ -31,4 +31,20 @@ describe('ModalLayer', () => {
     expect(screen.getByRole('dialog', { name: '所问之事' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '关闭' })).not.toBeInTheDocument();
   });
+
+  it('uses distinct title labels for multiple dialogs', () => {
+    render(
+      <>
+        <ModalLayer title="AI 配置">
+          <p>填写 API 信息</p>
+        </ModalLayer>
+        <ModalLayer title="所问之事">
+          <p>请输入问题</p>
+        </ModalLayer>
+      </>
+    );
+
+    expect(screen.getByRole('dialog', { name: 'AI 配置' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '所问之事' })).toBeInTheDocument();
+  });
 });
