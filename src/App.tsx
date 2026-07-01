@@ -4,6 +4,7 @@ import type { AiReadingStatus } from './ai/aiStatus';
 import { createAiInterpretation } from './ai/openaiReading';
 import AiSettingsDialog from './components/AiSettingsDialog';
 import CastProgressToast from './components/CastProgressToast';
+import GestureControl from './components/GestureControl';
 import QuestionDialog from './components/QuestionDialog';
 import ResultDialog from './components/ResultDialog';
 import TabletopScene from './components/TabletopScene';
@@ -216,6 +217,12 @@ export default function App() {
       {session.phase === 'casting' ? (
         <CastProgressToast currentThrow={session.currentThrow} isAnimating={pendingToss !== null} />
       ) : null}
+
+      <GestureControl
+        isCasting={session.phase === 'casting'}
+        isTossing={pendingToss !== null}
+        onGestureToss={requestToss}
+      />
 
       {activeDialog === 'ai-settings' ? (
         <AiSettingsDialog

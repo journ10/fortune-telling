@@ -1,8 +1,4 @@
-import {
-  FilesetResolver,
-  GestureRecognizer,
-  type GestureRecognizerResult
-} from '@mediapipe/tasks-vision';
+import type { GestureRecognizer, GestureRecognizerResult } from '@mediapipe/tasks-vision';
 
 export type RecognizedGesture =
   | 'None'
@@ -89,6 +85,7 @@ export function stopCamera(stream: MediaStream): void {
 }
 
 export async function createMediaPipeRecognizer(): Promise<GestureRecognizer> {
+  const { FilesetResolver, GestureRecognizer } = await import('@mediapipe/tasks-vision');
   const vision = await FilesetResolver.forVisionTasks(
     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm'
   );
