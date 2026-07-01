@@ -28,4 +28,18 @@ describe('QuestionDialog', () => {
 
     expect(onStart).toHaveBeenCalledWith('这个决定现在是否可行？', 'general');
   });
+
+  it('resets the question type when replacing a quick question with custom text', async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+
+    render(<QuestionDialog onStart={onStart} />);
+
+    await user.click(screen.getByRole('button', { name: '最近事业' }));
+    await user.clear(screen.getByRole('textbox', { name: '所问之事' }));
+    await user.type(screen.getByRole('textbox', { name: '所问之事' }), '  我是否应该接受这个邀约？  ');
+    await user.click(screen.getByRole('button', { name: '开始起卦' }));
+
+    expect(onStart).toHaveBeenCalledWith('我是否应该接受这个邀约？', 'general');
+  });
 });
