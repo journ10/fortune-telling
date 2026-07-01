@@ -1,7 +1,15 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+
+const SETTLE_DELAY_MS = 320;
+
+async function advanceTossSettlement() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(SETTLE_DELAY_MS);
+  });
+}
 
 async function saveAiSettings(
   user: ReturnType<typeof userEvent.setup>,
@@ -46,34 +54,28 @@ async function startCastingWithDefaultQuestion(user: ReturnType<typeof userEvent
   await user.click(screen.getByRole('button', { name: '开始起卦' }));
 }
 
-async function settleOneToss(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: '投掷铜钱' }));
+async function settleOneToss() {
+  fireEvent.click(screen.getByRole('button', { name: '投掷铜钱' }));
 
-  await waitFor(() => {
-    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeDisabled();
-  });
-
-  await waitFor(
-    () => {
-      expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeEnabled();
-    },
-    { timeout: 1000 }
-  );
+  expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeDisabled();
+  await advanceTossSettlement();
+  expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeEnabled();
 }
 
-async function settleSixTosses(user: ReturnType<typeof userEvent.setup>) {
+async function settleSixTosses() {
+  vi.useFakeTimers();
+
   for (let index = 0; index < 5; index += 1) {
-    await settleOneToss(user);
+    await settleOneToss();
   }
 
-  await user.click(screen.getByRole('button', { name: '投掷铜钱' }));
+  fireEvent.click(screen.getByRole('button', { name: '投掷铜钱' }));
 
-  await waitFor(
-    () => {
-      expect(screen.getByRole('button', { name: '查看结果' })).toBeEnabled();
-    },
-    { timeout: 1000 }
-  );
+  expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeDisabled();
+  await advanceTossSettlement();
+  expect(screen.getByRole('button', { name: '查看结果' })).toBeEnabled();
+
+  vi.useRealTimers();
 }
 
 describe('App', () => {
@@ -99,6 +101,10 @@ describe('App', () => {
       value: storageMock
     });
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('opens with the AI settings dialog when API settings are missing', () => {
@@ -160,7 +166,7 @@ describe('App', () => {
       model: 'gpt-4o-mini'
     });
     await startCastingWithDefaultQuestion(user);
-    await settleSixTosses(user);
+    await settleSixTosses();
 
     expect(await screen.findByRole('heading', { name: 'AI：守正而后动' })).toBeInTheDocument();
     expect(screen.getByText(/AI 解卦已生成/)).toBeInTheDocument();
@@ -205,7 +211,7 @@ describe('App', () => {
     expect(screen.getByLabelText('模型')).toHaveValue('claude-sonnet-4-6');
     await saveAiSettings(user, { apiKey: 'sk-ant-user' });
     await startCastingWithDefaultQuestion(user);
-    await settleSixTosses(user);
+    await settleSixTosses();
 
     expect(await screen.findByRole('heading', { name: 'Claude：变中求稳' })).toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledWith(
@@ -253,7 +259,7 @@ describe('App', () => {
     expect(screen.getByLabelText('模型')).toHaveValue('deepseek-v4-flash');
     await saveAiSettings(user, { apiKey: 'sk-deepseek-user' });
     await startCastingWithDefaultQuestion(user);
-    await settleSixTosses(user);
+    await settleSixTosses();
 
     expect(await screen.findByRole('heading', { name: 'DeepSeek：顺势而断' })).toBeInTheDocument();
     const request = JSON.parse(fetchCalls[0][1]?.body as string);
@@ -283,7 +289,7 @@ describe('App', () => {
 
     await saveAiSettings(user, { apiKey: 'sk-user' });
     await startCastingWithDefaultQuestion(user);
-    await settleSixTosses(user);
+    await settleSixTosses();
 
     expect(await screen.findByText('AI 解卦失败：model not found')).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: 'AI 解读' })).toBeInTheDocument();
@@ -327,7 +333,7 @@ describe('App', () => {
 
     await saveAiSettings(user, { apiKey: 'sk-user' });
     await startCastingWithDefaultQuestion(user);
-    await settleSixTosses(user);
+    await settleSixTosses();
     expect(await screen.findByText('AI 解卦失败：model not found')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '修改 AI 配置' }));
@@ -337,5 +343,80 @@ describe('App', () => {
     expect(screen.queryByRole('dialog', { name: '所问之事' })).not.toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'AI：重试成功' })).toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('reopens the result dialog from the tabletop after the result dialog closes', async () => {
+    const user = userEvent.setup();
+    const fetcher = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                headline: 'AI：结果可回看',
+                plainText: '关闭结果后，桌面上的结果入口仍可再次打开。',
+                advice: ['先看结果', '再做记录', '按需重新起卦']
+              })
+            }
+          }
+        ]
+      }),
+      text: async () => ''
+    }));
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<App />);
+
+    await saveAiSettings(user, { apiKey: 'sk-user' });
+    await startCastingWithDefaultQuestion(user);
+    await settleSixTosses();
+    expect(await screen.findByRole('heading', { name: 'AI：结果可回看' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '关闭' }));
+    expect(screen.queryByRole('dialog', { name: 'AI 解读' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '查看结果' }));
+    expect(screen.getByRole('dialog', { name: 'AI 解读' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'AI：结果可回看' })).toBeInTheDocument();
+  });
+
+  it('resets the completed result and returns to the question dialog without requiring AI settings again', async () => {
+    const user = userEvent.setup();
+    const fetcher = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                headline: 'AI：可以重起',
+                plainText: '完成一次起卦后，重新起卦会清空旧结果。',
+                advice: ['保留配置', '重新提问', '重新投掷']
+              })
+            }
+          }
+        ]
+      }),
+      text: async () => ''
+    }));
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<App />);
+
+    await saveAiSettings(user, { apiKey: 'sk-user' });
+    await startCastingWithDefaultQuestion(user);
+    await settleSixTosses();
+    expect(await screen.findByRole('heading', { name: 'AI：可以重起' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '重新起卦' }));
+
+    expect(screen.getByRole('dialog', { name: '所问之事' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'AI 配置' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'AI 解读' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'AI：可以重起' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeInTheDocument();
   });
 });
