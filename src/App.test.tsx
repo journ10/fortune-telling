@@ -303,6 +303,37 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '修改 AI 配置' })).toBeInTheDocument();
   });
 
+  it('returns from result-time AI settings without saving when edited settings are incomplete', async () => {
+    const user = userEvent.setup();
+    const fetcher = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+      text: async () => JSON.stringify({ error: { message: 'model not found' } })
+    }));
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<App />);
+
+    await saveAiSettings(user, { apiKey: 'sk-user' });
+    await startCastingWithDefaultQuestion(user);
+    await settleSixTosses();
+    expect(await screen.findByText('AI 解卦失败：model not found')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '修改 AI 配置' }));
+    expect(screen.getByRole('dialog', { name: 'AI 配置' })).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('API Key'));
+
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: '关闭' }));
+
+    expect(screen.getByRole('dialog', { name: 'AI 解读' })).toBeInTheDocument();
+    expect(screen.getByText('AI 解卦失败：model not found')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '所问之事' })).not.toBeInTheDocument();
+  });
+
   it('resets an AI failure and returns to the question dialog without requiring AI settings again', async () => {
     const user = userEvent.setup();
     const fetcher = vi.fn(async () => ({

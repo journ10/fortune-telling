@@ -73,6 +73,26 @@ describe('TabletopScene', () => {
     expect(onTossSettled).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps fallback coins and settles a toss when WebGL renderer setup fails', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      {} as CanvasRenderingContext2D
+    );
+    const pendingToss = createCoinToss(['heads', 'tails', 'heads']);
+    const onTossSettled = vi.fn();
+
+    expect(() => renderTabletopScene({ pendingToss, onTossSettled })).not.toThrow();
+
+    expect(document.querySelector('.tabletopCanvas canvas')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.fallbackCoin')).toHaveLength(3);
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    expect(onTossSettled).toHaveBeenCalledTimes(1);
+  });
+
   it('settles a rerendered pending toss once without restarting the timer', async () => {
     vi.useFakeTimers();
     const pendingToss = createCoinToss(['heads', 'tails', 'tails']);

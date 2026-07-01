@@ -127,7 +127,7 @@ h3 {
   pointer-events: none;
 }
 
-.tabletopScene:has(canvas) .fallbackCoins {
+.tabletopScene[data-webgl-active="true"] .fallbackCoins {
   opacity: 0;
 }
 

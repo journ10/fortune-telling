@@ -216,6 +216,7 @@ export default function App() {
           aiSettings={aiSettings}
           isAiConfigured={isAiConfigured}
           onAiSettingsChange={setAiSettings}
+          onClose={resultAvailable ? () => setActiveDialog('result') : undefined}
           onSubmit={handleAiSettingsSubmit}
         />
       ) : null}

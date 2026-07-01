@@ -5,6 +5,7 @@ interface AiSettingsDialogProps {
   aiSettings: AiSettings;
   isAiConfigured: boolean;
   onAiSettingsChange: (settings: AiSettings) => void;
+  onClose?: () => void;
   onSubmit: () => void;
 }
 
@@ -12,6 +13,7 @@ export default function AiSettingsDialog({
   aiSettings,
   isAiConfigured,
   onAiSettingsChange,
+  onClose,
   onSubmit
 }: AiSettingsDialogProps) {
   const updateProvider = (provider: AiProvider) => {
@@ -25,6 +27,7 @@ export default function AiSettingsDialog({
   return (
     <ModalLayer
       title="AI 配置"
+      onClose={onClose}
       footer={
         <button className="primaryButton" type="button" disabled={!isAiConfigured} onClick={onSubmit}>
           保存配置
