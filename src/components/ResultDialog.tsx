@@ -24,6 +24,14 @@ const tabs: Array<{ id: ResultTab; label: string }> = [
   { id: 'basis', label: '传统依据' }
 ];
 
+function getTabId(tab: ResultTab): string {
+  return `result-tab-${tab}`;
+}
+
+function getPanelId(tab: ResultTab): string {
+  return `result-panel-${tab}`;
+}
+
 function renderAiFallback(aiStatus?: AiReadingStatus | null) {
   const isError = aiStatus?.state === 'error';
 
@@ -98,9 +106,11 @@ export function ResultDialog({
         {tabs.map((tab) => (
           <button
             key={tab.id}
+            id={getTabId(tab.id)}
             type="button"
             role="tab"
             aria-selected={activeTab === tab.id}
+            aria-controls={getPanelId(tab.id)}
             className={activeTab === tab.id ? 'activeTab' : undefined}
             onClick={() => setActiveTab(tab.id)}
           >
@@ -109,7 +119,12 @@ export function ResultDialog({
         ))}
       </div>
 
-      <div className="resultTabPanel">
+      <div
+        id={getPanelId(activeTab)}
+        className="resultTabPanel"
+        role="tabpanel"
+        aria-labelledby={getTabId(activeTab)}
+      >
         {activeTab === 'ai'
           ? aiInterpretation
             ? renderAiInterpretation(aiInterpretation)

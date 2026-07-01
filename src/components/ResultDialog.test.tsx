@@ -4,10 +4,16 @@ import { vi } from 'vitest';
 import type { AiReadingStatus } from '../ai/aiStatus';
 import { buildCasting, createCoinToss } from '../domain/coinToss';
 import { createCastingResult } from '../domain/interpretation';
-import type { AiInterpretation } from '../domain/types';
+import type { AiInterpretation, Casting, CastingResult } from '../domain/types';
 import ResultDialog from './ResultDialog';
 
-function buildResultDialogFixture() {
+interface ResultDialogFixture {
+  aiInterpretation: AiInterpretation | null;
+  casting: Casting;
+  castingResult: CastingResult;
+}
+
+function buildResultDialogFixture(): ResultDialogFixture {
   const tosses = [
     createCoinToss(['heads', 'tails', 'tails']),
     createCoinToss(['heads', 'tails', 'tails']),
@@ -31,14 +37,14 @@ function buildResultDialogFixture() {
 interface RenderResultDialogOptions {
   aiInterpretation?: AiInterpretation | null;
   aiStatus?: AiReadingStatus | null;
+  fixture?: ResultDialogFixture;
 }
 
 function renderResultDialog({
   aiInterpretation,
-  aiStatus
+  aiStatus,
+  fixture = buildResultDialogFixture()
 }: RenderResultDialogOptions = {}) {
-  const fixture = buildResultDialogFixture();
-
   render(
     <ResultDialog
       aiStatus={aiStatus}
@@ -71,8 +77,24 @@ describe('ResultDialog', () => {
     expect(within(dialog).getByText('AI 解卦已生成；传统卦辞与爻辞未被改写。')).toBeInTheDocument();
     expect(within(dialog).getByRole('heading', { name: 'AI：明断但不冒进' })).toBeInTheDocument();
     expect(within(dialog).getByText('先确认边界')).toBeInTheDocument();
+    const aiTab = within(dialog).getByRole('tab', { name: 'AI 解读' });
+    expect(aiTab).toHaveAttribute('id', 'result-tab-ai');
+    expect(aiTab).toHaveAttribute('aria-controls', 'result-panel-ai');
+    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute('id', 'result-panel-ai');
+    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
+      'aria-labelledby',
+      'result-tab-ai'
+    );
 
     await user.click(within(dialog).getByRole('tab', { name: '原始卦象' }));
+    const summaryTab = within(dialog).getByRole('tab', { name: '原始卦象' });
+    expect(summaryTab).toHaveAttribute('id', 'result-tab-summary');
+    expect(summaryTab).toHaveAttribute('aria-controls', 'result-panel-summary');
+    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute('id', 'result-panel-summary');
+    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
+      'aria-labelledby',
+      'result-tab-summary'
+    );
     expect(within(dialog).getByText('泽天夬')).toBeInTheDocument();
     expect(within(dialog).getByText('兑为泽')).toBeInTheDocument();
     expect(within(dialog).getByText('九三')).toBeInTheDocument();
@@ -96,5 +118,31 @@ describe('ResultDialog', () => {
     expect(within(dialog).queryByText('行动建议')).not.toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: '重试 AI 解读' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: '修改 AI 配置' })).toBeInTheDocument();
+  });
+
+  it('renders stable casting facts without changed hexagram or moving lines', async () => {
+    const user = userEvent.setup();
+    const tosses = [
+      createCoinToss(['heads', 'tails', 'tails']),
+      createCoinToss(['heads', 'tails', 'tails']),
+      createCoinToss(['heads', 'tails', 'tails']),
+      createCoinToss(['heads', 'tails', 'tails']),
+      createCoinToss(['heads', 'tails', 'tails']),
+      createCoinToss(['heads', 'tails', 'tails'])
+    ];
+    const casting = buildCasting('今日运势', 'general', tosses);
+    const castingResult = createCastingResult(casting);
+
+    renderResultDialog({
+      aiInterpretation: null,
+      aiStatus: null,
+      fixture: { aiInterpretation: null, casting, castingResult }
+    });
+
+    const dialog = screen.getByRole('dialog', { name: 'AI 解读' });
+    await user.click(within(dialog).getByRole('tab', { name: '原始卦象' }));
+
+    expect(within(dialog).getByText('无变卦')).toBeInTheDocument();
+    expect(within(dialog).getByText('无动爻')).toBeInTheDocument();
   });
 });
