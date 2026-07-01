@@ -60,7 +60,10 @@ describe('TabletopScene', () => {
   });
 
   it('uses a thin cash-coin silhouette instead of a token-like slab', () => {
-    expect(TABLETOP_COIN_THICKNESS / (TABLETOP_COIN_RADIUS * 2)).toBeLessThanOrEqual(0.045);
+    const thicknessRatio = TABLETOP_COIN_THICKNESS / (TABLETOP_COIN_RADIUS * 2);
+
+    expect(thicknessRatio).toBeGreaterThanOrEqual(0.04);
+    expect(thicknessRatio).toBeLessThanOrEqual(0.045);
 
     const coin = createCoinGroup(0);
     const bounds = new THREE.Box3().setFromObject(coin);
@@ -126,6 +129,28 @@ describe('TabletopScene', () => {
     });
 
     expect(reliefMeshes.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('uses bump-mapped faces so cast lettering is not a flat bitmap', () => {
+    const coin = createCoinGroup(0);
+    const faceMaterials: THREE.MeshStandardMaterial[] = [];
+
+    coin.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
+        const material = child.material;
+
+        if (material.map && material.side === THREE.DoubleSide) {
+          faceMaterials.push(material);
+        }
+      }
+    });
+
+    expect(faceMaterials).toHaveLength(2);
+    faceMaterials.forEach((material) => {
+      expect(material.bumpMap).toBe(material.map);
+      expect(material.bumpScale).toBeGreaterThan(0);
+      expect(material.bumpScale).toBeLessThanOrEqual(0.012);
+    });
   });
 
   it('references a project coin texture sheet asset for WebGL coin faces', () => {

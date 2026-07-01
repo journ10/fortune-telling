@@ -743,6 +743,8 @@ function createCoinFaceMaterial(
     : createCoinFaceTexture(face, variant);
 
   return new THREE.MeshStandardMaterial({
+    bumpMap: faceTexture,
+    bumpScale: face === 'heads' ? 0.008 : 0.006,
     color: 0xffffff,
     depthWrite: false,
     emissive: 0xffffff,
