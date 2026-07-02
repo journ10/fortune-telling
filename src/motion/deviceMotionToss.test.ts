@@ -68,49 +68,67 @@ describe('createDeviceMotionTossDetector', () => {
     expect(result.summary?.energy).toBeGreaterThan(0);
   });
 
-  it('keeps below-stop quiet samples out of the release strength summary', () => {
+  it('keeps below-stop quiet samples out of the release summary', () => {
     const detector = createDeviceMotionTossDetector({ quietWindowMs: 600 });
+    const activeOnlyDetector = createDeviceMotionTossDetector({ quietWindowMs: 600 });
+    const activeSamples = [
+      {
+        timestamp: 0,
+        accelerationMagnitude: 20,
+        accelerationVector: [20, 0, 0] as [number, number, number],
+        rotationMagnitude: 120,
+        rotationVector: [120, 0, 0] as [number, number, number]
+      },
+      {
+        timestamp: 120,
+        accelerationMagnitude: 18,
+        accelerationVector: [18, 0, 0] as [number, number, number],
+        rotationMagnitude: 90,
+        rotationVector: [90, 0, 0] as [number, number, number]
+      }
+    ];
+    const releaseSample = {
+      timestamp: 820,
+      accelerationMagnitude: 0,
+      accelerationVector: [0, 0, 0] as [number, number, number],
+      rotationMagnitude: 0,
+      rotationVector: [0, 0, 0] as [number, number, number]
+    };
 
-    const firstActive = detector.update({
-      timestamp: 0,
-      accelerationMagnitude: 20,
-      accelerationVector: [20, 0, 0],
-      rotationMagnitude: 120,
-      rotationVector: [120, 0, 0]
-    });
-    const secondActive = detector.update({
-      timestamp: 120,
-      accelerationMagnitude: 18,
-      accelerationVector: [18, 0, 0],
-      rotationMagnitude: 90,
-      rotationVector: [90, 0, 0]
-    });
-    const activeEnergy = firstActive.energy + secondActive.energy;
+    for (const sample of activeSamples) {
+      detector.update(sample);
+      activeOnlyDetector.update(sample);
+    }
 
     for (let timestamp = 180; timestamp < 720; timestamp += 60) {
       detector.update({
         timestamp,
-        accelerationMagnitude: 2.52,
-        accelerationVector: [0, 2.52, 0],
-        rotationMagnitude: 0,
-        rotationVector: [0, 0, 0]
+        accelerationMagnitude: 1.2,
+        accelerationVector: [0, 30, 0],
+        rotationMagnitude: 12,
+        rotationVector: [700, 800, 900]
       });
     }
 
-    const result = detector.update({
-      timestamp: 820,
-      accelerationMagnitude: 0,
-      accelerationVector: [0, 0, 0],
-      rotationMagnitude: 0,
-      rotationVector: [0, 0, 0]
-    });
+    const result = detector.update(releaseSample);
+    const activeOnlyResult = activeOnlyDetector.update(releaseSample);
 
     expect(result.state).toBe('released');
+    expect(activeOnlyResult.state).toBe('released');
     expect(result.summary).toMatchObject({
       durationMs: 820,
       peakCount: 1
     });
-    expect(result.summary?.energy).toBeCloseTo(activeEnergy, 5);
+    expect(activeOnlyResult.summary).toMatchObject({
+      durationMs: 820,
+      peakCount: 1
+    });
+    expect(result.summary?.energy).toBeCloseTo(activeOnlyResult.summary?.energy ?? 0, 5);
+    expect(result.summary?.digest).toBe(activeOnlyResult.summary?.digest);
+    expect(result.summary?.dominantAcceleration).toEqual(
+      activeOnlyResult.summary?.dominantAcceleration
+    );
+    expect(result.summary?.rotationBias).toEqual(activeOnlyResult.summary?.rotationBias);
   });
 
   it('does not depend on one acceleration axis to detect shaking', () => {
