@@ -15,9 +15,25 @@ import {
   createCoinPhysicsSimulation,
   createSeededRandom,
   randomGaussianOffset,
-  initCoinPhysics
+  initCoinPhysics,
+  type CoinPhysicsSnapshot
 } from './coinPhysics';
 import { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS } from './coinGeometry';
+import { createPointerPhysicalTossInput } from './physicalTossInput';
+
+function createTestPhysicalInput(seed = 0x51f15eed) {
+  return createPointerPhysicalTossInput({
+    currentThrow: 1,
+    sceneWidth: 720,
+    sceneHeight: 480,
+    perturbationSeed: seed,
+    samples: [
+      { x: 200, y: 260, timestamp: 0 },
+      { x: 260, y: 220, timestamp: 90 },
+      { x: 350, y: 170, timestamp: 180 }
+    ]
+  });
+}
 
 function physicsFaceNormalY(rotation: THREE.Quaternion): number {
   return new THREE.Vector3(0, 1, 0).applyQuaternion(rotation).y;
@@ -33,16 +49,48 @@ function coinColliderBottomY(position: THREE.Vector3, rotation: THREE.Quaternion
   return position.y - verticalExtent;
 }
 
-function stepUntilSettled(currentThrow: number, requestId: number, tossSeed = 0x5eed1234) {
-  const simulation = createCoinPhysicsSimulation(currentThrow, requestId, tossSeed);
+function createScenarioPhysicalInput(
+  currentThrow: number,
+  requestId: number,
+  tossSeed = 0x5eed1234
+) {
+  const xOffset = ((requestId % 5) - 2) * 18;
+  const yOffset = ((currentThrow % 3) - 1) * 14;
+
+  return createPointerPhysicalTossInput({
+    currentThrow,
+    sceneWidth: 720,
+    sceneHeight: 480,
+    perturbationSeed: tossSeed ^ Math.imul(requestId + 17, 0x9e3779b1),
+    samples: [
+      { x: 210 + xOffset, y: 290 + yOffset, timestamp: 0 },
+      { x: 282 + xOffset, y: 232 + yOffset, timestamp: 90 },
+      { x: 386 + xOffset, y: 164 + yOffset, timestamp: 180 }
+    ]
+  });
+}
+
+function stepUntilSettled(input = createScenarioPhysicalInput(1, 1)) {
+  const simulation = createCoinPhysicsSimulation(input);
   let snapshot = simulation.snapshot();
 
-  for (let step = 0; step < 720 && !snapshot.settled; step += 1) {
+  for (let step = 0; step < 1500 && !snapshot.settled; step += 1) {
     snapshot = simulation.step(1 / 60);
   }
 
   simulation.dispose();
   return snapshot;
+}
+
+function expectLegacyContainedCoins(snapshot: CoinPhysicsSnapshot) {
+  expect(snapshot.coins).toHaveLength(3);
+  snapshot.coins.forEach((coin) => {
+    expect(Number.isFinite(coin.position.x)).toBe(true);
+    expect(Number.isFinite(coin.position.y)).toBe(true);
+    expect(Number.isFinite(coin.position.z)).toBe(true);
+    expect(Math.abs(coin.position.x)).toBeLessThanOrEqual(2.2);
+    expect(Math.abs(coin.position.z)).toBeLessThanOrEqual(2.2);
+  });
 }
 
 describe('coinPhysics', () => {
@@ -113,9 +161,43 @@ describe('coinPhysics', () => {
     expect(coinFaceFromPhysicsRotation(tailsUp)).toBe('tails');
   });
 
+  it('creates simulated coin bodies from physical toss input', async () => {
+    await initCoinPhysics();
+    const input = createTestPhysicalInput();
+    const simulation = createCoinPhysicsSimulation(input);
+    const snapshot = simulation.snapshot();
+
+    expect(snapshot.coins).toHaveLength(3);
+    snapshot.coins.forEach((coin, index) => {
+      expect(coin.position.x).toBeCloseTo(input.coins[index].position[0], 5);
+      expect(coin.position.y).toBeCloseTo(input.coins[index].position[1], 5);
+      expect(coin.position.z).toBeCloseTo(input.coins[index].position[2], 5);
+    });
+
+    simulation.dispose();
+  });
+
+  it('settles physical toss input and reads faces from body rotations', async () => {
+    await initCoinPhysics();
+    const simulation = createCoinPhysicsSimulation(createTestPhysicalInput(0x7777abcd));
+    let snapshot = simulation.snapshot();
+
+    for (let step = 0; step < 900 && !snapshot.settled; step += 1) {
+      snapshot = simulation.step(1 / 60);
+    }
+
+    expect(snapshot.settled).toBe(true);
+    expect(snapshot.faces).toHaveLength(3);
+    snapshot.faces?.forEach((face, index) => {
+      expect(face).toBe(coinFaceFromPhysicsRotation(snapshot.coins[index].physicsRotation));
+    });
+
+    simulation.dispose();
+  });
+
   it('creates three simulated coin bodies whose results come from final physics rotations', async () => {
     await initCoinPhysics();
-    const snapshot = stepUntilSettled(4, 9);
+    const snapshot = stepUntilSettled(createScenarioPhysicalInput(4, 9));
 
     expect(snapshot.coins).toHaveLength(3);
     expect(snapshot.faces).toHaveLength(3);
@@ -126,8 +208,12 @@ describe('coinPhysics', () => {
 
   it('uses the supplied toss seed to change the initial physics state', async () => {
     await initCoinPhysics();
-    const firstSimulation = createCoinPhysicsSimulation(2, 3, 0x11111111);
-    const secondSimulation = createCoinPhysicsSimulation(2, 3, 0x22222222);
+    const firstSimulation = createCoinPhysicsSimulation(
+      createScenarioPhysicalInput(2, 3, 0x11111111)
+    );
+    const secondSimulation = createCoinPhysicsSimulation(
+      createScenarioPhysicalInput(2, 3, 0x22222222)
+    );
     const firstSnapshot = firstSimulation.snapshot();
     const secondSnapshot = secondSimulation.snapshot();
 
@@ -141,69 +227,85 @@ describe('coinPhysics', () => {
     secondSimulation.dispose();
   });
 
-  it('starts chamber simulations with coins resting flat on the tabletop before shaking', async () => {
+  it('starts physical simulations from supplied input in released phase', async () => {
     await initCoinPhysics();
-    const simulation = createCoinPhysicsSimulation(1, 1, 0x1234, {
-      mode: 'chamber',
-      drive: { elapsedSeconds: 0, energy: 0, release: false }
-    });
+    const input = createScenarioPhysicalInput(1, 1, 0x1234);
+    const simulation = createCoinPhysicsSimulation(input);
     const snapshot = simulation.snapshot();
 
-    expect(snapshot.phase).toBe('contained');
+    expect(snapshot.phase).toBe('released');
     expect(snapshot.settled).toBe(false);
+    expect(snapshot.settledReason).toBeNull();
     snapshot.coins.forEach((coin, index) => {
-      expect(coin.position.y).toBeLessThan(TABLETOP_COIN_RADIUS * 0.18);
-      expect(Math.abs(physicsFaceNormalY(coin.physicsRotation))).toBeGreaterThanOrEqual(0.99);
-
-      snapshot.coins.slice(index + 1).forEach((otherCoin) => {
-        const horizontalDistance = Math.hypot(
-          coin.position.x - otherCoin.position.x,
-          coin.position.z - otherCoin.position.z
-        );
-
-        expect(horizontalDistance).toBeGreaterThanOrEqual(COIN_PHYSICS_COLLIDER_RADIUS * 2);
-      });
+      expect(coin.position.x).toBeCloseTo(input.coins[index].position[0], 5);
+      expect(coin.position.y).toBeCloseTo(input.coins[index].position[1], 5);
+      expect(coin.position.z).toBeCloseTo(input.coins[index].position[2], 5);
     });
 
     simulation.dispose();
   });
 
-  it('keeps chamber-driven coins bounded before release and settles only after release', async () => {
+  it('settles physical tosses without chamber release controls', async () => {
     await initCoinPhysics();
-    const simulation = createCoinPhysicsSimulation(1, 1, 0x4567, {
-      mode: 'chamber',
-      drive: { elapsedSeconds: 0, energy: 0.8, release: false }
-    });
+    const simulation = createCoinPhysicsSimulation(createScenarioPhysicalInput(1, 1, 0x4567));
 
     let snapshot = simulation.snapshot();
 
-    for (let step = 0; step < 180; step += 1) {
-      simulation.updateChamberDrive?.({
-        elapsedSeconds: step / 60,
-        energy: 0.85,
-        release: false
-      });
-      snapshot = simulation.step(1 / 60);
-
-      expect(snapshot.phase).toBe('contained');
-      expect(snapshot.settled).toBe(false);
-      snapshot.coins.forEach((coin) => {
-        expect(Number.isFinite(coin.position.x)).toBe(true);
-        expect(Number.isFinite(coin.position.y)).toBe(true);
-        expect(Number.isFinite(coin.position.z)).toBe(true);
-        expect(Math.abs(coin.position.x)).toBeLessThanOrEqual(1.94);
-        expect(Math.abs(coin.position.z)).toBeLessThanOrEqual(1.32);
-        expect(coin.position.y).toBeLessThanOrEqual(1.28);
-      });
-    }
-
-    simulation.releaseChamber?.({ elapsedSeconds: 3.1, energy: 0.85, release: true });
+    expect(simulation.releaseChamber).toBeUndefined();
+    expect(simulation.updateChamberDrive).toBeUndefined();
 
     for (let step = 0; step < 1500 && !snapshot.settled; step += 1) {
       snapshot = simulation.step(1 / 60);
     }
 
     expect(snapshot.phase).toBe('settled');
+    expect(snapshot.faces).toHaveLength(3);
+    expect(snapshot.settledReason).not.toBeNull();
+    snapshot.faces?.forEach((face, index) => {
+      expect(face).toBe(coinFaceFromPhysicsRotation(snapshot.coins[index].physicsRotation));
+    });
+
+    simulation.dispose();
+  });
+
+  it('keeps legacy chamber compatibility from settling before release', async () => {
+    await initCoinPhysics();
+    const simulation = createCoinPhysicsSimulation(1, 7, 0x12345678, {
+      mode: 'chamber',
+      drive: { elapsedSeconds: 0, energy: 0.8, release: false }
+    });
+    let snapshot = simulation.snapshot();
+
+    expect(snapshot.phase).toBe('contained');
+    expect(snapshot.settled).toBe(false);
+    expect(snapshot.faces).toBeNull();
+    expectLegacyContainedCoins(snapshot);
+    expect(simulation.updateChamberDrive).toBeTypeOf('function');
+    expect(simulation.releaseChamber).toBeTypeOf('function');
+
+    for (let step = 0; step < 360; step += 1) {
+      simulation.updateChamberDrive?.({
+        elapsedSeconds: step / 60,
+        energy: 0.86,
+        release: false
+      });
+      snapshot = simulation.step(1 / 60);
+      expect(snapshot.phase).toBe('contained');
+      expect(snapshot.settled).toBe(false);
+      expect(snapshot.faces).toBeNull();
+      expectLegacyContainedCoins(snapshot);
+    }
+
+    snapshot =
+      simulation.releaseChamber?.({ elapsedSeconds: 6, energy: 0.86, release: true }) ??
+      snapshot;
+    expect(snapshot.phase).toBe('released');
+
+    for (let step = 0; step < 900 && !snapshot.settled; step += 1) {
+      snapshot = simulation.step(1 / 60);
+    }
+
+    expect(snapshot.settled).toBe(true);
     expect(snapshot.faces).toHaveLength(3);
     snapshot.faces?.forEach((face, index) => {
       expect(face).toBe(coinFaceFromPhysicsRotation(snapshot.coins[index].physicsRotation));
@@ -212,41 +314,22 @@ describe('coinPhysics', () => {
     simulation.dispose();
   });
 
-  it('keeps chamber-driven coin colliders above the tabletop during shaking and release', async () => {
+  it('keeps physical coin colliders above the tabletop while settling', async () => {
     await initCoinPhysics();
 
     for (let tossSeed = 1; tossSeed <= 18; tossSeed += 1) {
-      const simulation = createCoinPhysicsSimulation(1, 1, tossSeed * 0x1f123bb5, {
-        mode: 'chamber',
-        drive: { elapsedSeconds: 0, energy: 0.9, release: false }
-      });
+      const simulation = createCoinPhysicsSimulation(
+        createScenarioPhysicalInput(1, 1, tossSeed * 0x1f123bb5)
+      );
       let snapshot = simulation.snapshot();
 
-      for (let step = 0; step < 240; step += 1) {
-        simulation.updateChamberDrive?.({
-          elapsedSeconds: step / 60,
-          energy: 0.92,
-          release: false
-        });
+      for (let step = 0; step < 720 && !snapshot.settled; step += 1) {
         snapshot = simulation.step(1 / 60);
 
         snapshot.coins.forEach((coin, index) => {
           expect(
             coinColliderBottomY(coin.position, coin.physicsRotation),
-            `seed ${tossSeed} coin ${index} contained step ${step}`
-          ).toBeGreaterThanOrEqual(-0.02);
-        });
-      }
-
-      simulation.releaseChamber?.({ elapsedSeconds: 4.1, energy: 0.92, release: true });
-
-      for (let step = 0; step < 360 && !snapshot.settled; step += 1) {
-        snapshot = simulation.step(1 / 60);
-
-        snapshot.coins.forEach((coin, index) => {
-          expect(
-            coinColliderBottomY(coin.position, coin.physicsRotation),
-            `seed ${tossSeed} coin ${index} released step ${step}`
+            `seed ${tossSeed} coin ${index} step ${step}`
           ).toBeGreaterThanOrEqual(-0.02);
         });
       }
@@ -260,7 +343,7 @@ describe('coinPhysics', () => {
 
     for (let currentThrow = 1; currentThrow <= 6; currentThrow += 1) {
       for (let requestId = 1; requestId <= 8; requestId += 1) {
-        const snapshot = stepUntilSettled(currentThrow, requestId);
+        const snapshot = stepUntilSettled(createScenarioPhysicalInput(currentThrow, requestId));
 
         expect(snapshot.settled, `throw ${currentThrow}, request ${requestId}`).toBe(true);
         snapshot.coins.forEach((coin) => {

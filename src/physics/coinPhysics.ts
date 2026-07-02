@@ -2,6 +2,11 @@ import * as RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import type { CoinFace } from '../domain/types';
 import { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS } from './coinGeometry';
+import {
+  createPointerPhysicalTossInput,
+  type PhysicalCoinInitialState,
+  type PhysicalTossInput
+} from './physicalTossInput';
 
 export const COIN_PHYSICS_ENGINE = 'rapier3d-compat';
 
@@ -17,13 +22,10 @@ const EDGE_DESTABILIZE_IMPULSE = 0.08;
 const GAUSSIAN_MAX_SIGMA = 2.4;
 const MICRO_PERTURBATION_END_SECONDS = 1.65;
 const MICRO_PERTURBATION_BASE_IMPULSE = 0.00042;
-const CHAMBER_HALF_WIDTH = 1.74;
-const CHAMBER_HALF_DEPTH = 1.12;
-const CHAMBER_HALF_HEIGHT = 0.58;
-const CHAMBER_BOTTOM_HALF_HEIGHT = 0.035;
-const CHAMBER_BOTTOM_COLLIDER_CLEARANCE = 0.012;
 const TABLETOP_COLLIDER_FLOOR_CLEARANCE = 0.004;
 const TABLETOP_COLLIDER_MAX_PENETRATION = 0.018;
+const TABLETOP_CORRECTION_LINEAR_DAMPING = 0.94;
+const TABLETOP_CORRECTION_ANGULAR_DAMPING = 0.985;
 export const COIN_PHYSICS_COLLIDER_SKIN = 0.012;
 export const COIN_PHYSICS_COLLIDER_RADIUS = TABLETOP_COIN_RADIUS + COIN_PHYSICS_COLLIDER_SKIN;
 export const COIN_PHYSICS_COLLIDER_HALF_HEIGHT =
@@ -72,12 +74,15 @@ export interface SimulatedCoinSnapshot {
   visualRotation: THREE.Quaternion;
 }
 
+export type CoinPhysicsSettledReason = 'strict' | 'timeout-readable';
+
 export interface CoinPhysicsSnapshot {
   coins: SimulatedCoinSnapshot[];
   elapsed: number;
   faces: [CoinFace, CoinFace, CoinFace] | null;
   phase: CoinPhysicsPhase;
   settled: boolean;
+  settledReason: CoinPhysicsSettledReason | null;
 }
 
 export interface CoinPhysicsSimulation {
@@ -140,16 +145,6 @@ function mixCoinPhysicsSeed(currentThrow: number, requestId: number, tossSeed: n
   return seed >>> 0;
 }
 
-function createRandomQuaternion(random: SeededRandom, index: number): THREE.Quaternion {
-  return new THREE.Quaternion().setFromEuler(
-    new THREE.Euler(
-      randomGaussianOffset(random, Math.PI * 0.6),
-      random() * Math.PI * 2,
-      randomGaussianOffset(random, Math.PI * 0.6) + index * 0.24
-    )
-  );
-}
-
 function createMicroPerturbation(random: SeededRandom, index: number): MicroPerturbation {
   const axis = new THREE.Vector3(
     randomGaussianOffset(random, 1),
@@ -179,6 +174,10 @@ function quaternionFromRapier(rotation: RAPIER.Rotation): THREE.Quaternion {
   return new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w).normalize();
 }
 
+function quaternionFromTuple(tuple: PhysicalCoinInitialState['rotation']): THREE.Quaternion {
+  return new THREE.Quaternion(tuple[0], tuple[1], tuple[2], tuple[3]).normalize();
+}
+
 export function coinFaceFromVisualRotation(rotation: THREE.Quaternion): CoinFace {
   const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(rotation);
   return normal.y >= 0 ? 'heads' : 'tails';
@@ -191,6 +190,18 @@ export function coinFaceFromPhysicsRotation(rotation: THREE.Quaternion): CoinFac
 
 export function visualRotationFromPhysicsRotation(rotation: THREE.Quaternion): THREE.Quaternion {
   return rotation.clone().multiply(VISUAL_FROM_PHYSICS_ROTATION);
+}
+
+function coinSnapshotsFromPhysicalTossInput(input: PhysicalTossInput): SimulatedCoinSnapshot[] {
+  return input.coins.map((coin) => {
+    const physicsRotation = quaternionFromTuple(coin.rotation);
+
+    return {
+      position: new THREE.Vector3(...coin.position),
+      physicsRotation,
+      visualRotation: visualRotationFromPhysicsRotation(physicsRotation)
+    };
+  });
 }
 
 function physicsFaceNormalY(rotation: THREE.Quaternion): number {
@@ -230,17 +241,24 @@ function keepCoinsAboveTable(bodies: readonly RAPIER.RigidBody[]): void {
     );
 
     const linearVelocity = body.linvel();
+    body.setLinvel(
+      {
+        x: linearVelocity.x * TABLETOP_CORRECTION_LINEAR_DAMPING,
+        y: Math.max(0, linearVelocity.y),
+        z: linearVelocity.z * TABLETOP_CORRECTION_LINEAR_DAMPING
+      },
+      true
+    );
 
-    if (linearVelocity.y < 0) {
-      body.setLinvel(
-        {
-          x: linearVelocity.x,
-          y: 0,
-          z: linearVelocity.z
-        },
-        true
-      );
-    }
+    const angularVelocity = body.angvel();
+    body.setAngvel(
+      {
+        x: angularVelocity.x * TABLETOP_CORRECTION_ANGULAR_DAMPING,
+        y: angularVelocity.y * TABLETOP_CORRECTION_ANGULAR_DAMPING,
+        z: angularVelocity.z * TABLETOP_CORRECTION_ANGULAR_DAMPING
+      },
+      true
+    );
   });
 }
 
@@ -311,166 +329,65 @@ function applyMicroPerturbations(
   });
 }
 
-function createChamberPose(drive: TossDriveState, phaseOffset: number): {
-  rotation: THREE.Quaternion;
-  translation: THREE.Vector3;
-} {
-  const energy = clamp(drive.energy, 0, 1);
-  const elapsed = drive.elapsedSeconds;
-
-  if (energy <= 0.001) {
-    return {
-      rotation: new THREE.Quaternion(),
-      translation: new THREE.Vector3()
-    };
-  }
-
-  const rotation = new THREE.Quaternion().setFromEuler(
-    new THREE.Euler(
-      Math.sin(elapsed * 4.2 + phaseOffset) * 0.045 * energy,
-      Math.sin(elapsed * 2.4 + phaseOffset) * 0.06 * energy,
-      Math.cos(elapsed * 3.8 + phaseOffset) * 0.04 * energy
-    )
-  );
-  let bottomMinimumY = Number.POSITIVE_INFINITY;
-
-  [-CHAMBER_HALF_WIDTH, CHAMBER_HALF_WIDTH].forEach((x) => {
-    [-CHAMBER_HALF_DEPTH, CHAMBER_HALF_DEPTH].forEach((z) => {
-      bottomMinimumY = Math.min(
-        bottomMinimumY,
-        new THREE.Vector3(x, -CHAMBER_BOTTOM_HALF_HEIGHT * 2, z).applyQuaternion(rotation).y
-      );
-    });
-  });
-
-  const oscillatingLift =
-    0.04 + Math.max(0, Math.sin(elapsed * 10.5 + phaseOffset)) * 0.22 * energy;
-  const lift = Math.max(
-    oscillatingLift,
-    CHAMBER_BOTTOM_COLLIDER_CLEARANCE - bottomMinimumY
-  );
-  const translation = new THREE.Vector3(
-    Math.sin(elapsed * 3.1 + phaseOffset) * 0.11 * energy,
-    lift,
-    Math.cos(elapsed * 2.7 + phaseOffset * 0.7) * 0.09 * energy
-  );
-
-  return { rotation, translation };
-}
-
-export function createCoinPhysicsSimulation(
+function createLegacyPhysicalTossInput(
   currentThrow: number,
   requestId: number,
-  tossSeed = 0,
-  options: CoinPhysicsOptions = {}
-): CoinPhysicsSimulation {
-  const seed = mixCoinPhysicsSeed(currentThrow, requestId, tossSeed);
-  const random = createSeededRandom(seed);
-  const chamberMode = options.mode === 'chamber';
-  const chamberPhaseOffset = random() * Math.PI * 2;
-  let chamberDrive = options.drive ?? { elapsedSeconds: 0, energy: 0, release: false };
-  const initialChamberPose = chamberMode
-    ? createChamberPose(chamberDrive, chamberPhaseOffset)
-    : null;
+  tossSeed: number,
+  options: CoinPhysicsOptions
+): PhysicalTossInput {
+  const energy = clamp(options.drive?.energy ?? 0.58, 0.18, 1.2);
+  const startX = 240 + ((requestId % 5) - 2) * 16;
+  const startY = 292 + ((currentThrow % 3) - 1) * 12;
+  const travelX = 96 + energy * 126;
+  const travelY = 54 + energy * 72;
+
+  return createPointerPhysicalTossInput({
+    currentThrow,
+    sceneWidth: 720,
+    sceneHeight: 480,
+    perturbationSeed: mixCoinPhysicsSeed(currentThrow, requestId, tossSeed),
+    samples: [
+      { x: startX, y: startY, timestamp: 0 },
+      { x: startX + travelX * 0.45, y: startY - travelY * 0.35, timestamp: 90 },
+      { x: startX + travelX, y: startY - travelY, timestamp: 180 }
+    ]
+  });
+}
+
+function createPhysicalCoinPhysicsSimulation(input: PhysicalTossInput): CoinPhysicsSimulation {
+  const random = createSeededRandom(
+    input.perturbationSeed ^
+      Math.imul(input.currentThrow + 31, 0x85ebca6b) ^
+      Math.imul(Math.round(input.energy * 1000), 0xc2b2ae35)
+  );
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.integrationParameters.maxCcdSubsteps = 3;
   world.integrationParameters.numSolverIterations = 8;
   const table = RAPIER.ColliderDesc.cuboid(6.5, 0.04, 4.5)
     .setTranslation(0, -0.04, 0)
-    .setFriction(0.92)
+    .setFriction(0.92 + randomGaussianOffset(random, input.perturbationScale * 0.22))
     .setRestitution(0.1);
   world.createCollider(table);
 
-  const chamberBody = chamberMode
-    ? world.createRigidBody(
-        RAPIER.RigidBodyDesc.kinematicPositionBased()
-          .setTranslation(
-            initialChamberPose?.translation.x ?? 0,
-            initialChamberPose?.translation.y ?? 0,
-            initialChamberPose?.translation.z ?? 0
-          )
-          .setRotation({
-            x: initialChamberPose?.rotation.x ?? 0,
-            y: initialChamberPose?.rotation.y ?? 0,
-            z: initialChamberPose?.rotation.z ?? 0,
-            w: initialChamberPose?.rotation.w ?? 1
-          })
-      )
-    : null;
-
-  if (chamberBody) {
-    const bottom = RAPIER.ColliderDesc.cuboid(
-      CHAMBER_HALF_WIDTH,
-      CHAMBER_BOTTOM_HALF_HEIGHT,
-      CHAMBER_HALF_DEPTH
-    )
-      .setTranslation(0, -CHAMBER_BOTTOM_HALF_HEIGHT, 0)
-      .setFriction(1.2)
-      .setRestitution(0.02);
-    const top = RAPIER.ColliderDesc.cuboid(CHAMBER_HALF_WIDTH, 0.04, CHAMBER_HALF_DEPTH)
-      .setTranslation(0, CHAMBER_HALF_HEIGHT * 2, 0)
-      .setFriction(0.8)
-      .setRestitution(0.02);
-    const sideWall = (x: number, z: number, width: number, depth: number) =>
-      RAPIER.ColliderDesc.cuboid(width, CHAMBER_HALF_HEIGHT, depth)
-        .setTranslation(x, CHAMBER_HALF_HEIGHT, z)
-        .setFriction(0.95)
-        .setRestitution(0.02);
-
-    [
-      bottom,
-      top,
-      sideWall(-CHAMBER_HALF_WIDTH, 0, 0.04, CHAMBER_HALF_DEPTH),
-      sideWall(CHAMBER_HALF_WIDTH, 0, 0.04, CHAMBER_HALF_DEPTH),
-      sideWall(0, -CHAMBER_HALF_DEPTH, CHAMBER_HALF_WIDTH, 0.04),
-      sideWall(0, CHAMBER_HALF_DEPTH, CHAMBER_HALF_WIDTH, 0.04)
-    ].forEach((collider) => {
-      world.createCollider(collider, chamberBody);
-    });
-  }
-
   const microPerturbations: MicroPerturbation[] = [];
-  const bodies = [-1, 0, 1].map((slot, index) => {
-    const chamberLocalPosition = new THREE.Vector3(
-      slot * 1.06,
-      COIN_PHYSICS_COLLIDER_HALF_HEIGHT + 0.006,
-      (index - 1) * 0.08
-    );
-    const chamberStartPosition =
-      chamberMode && initialChamberPose
-        ? chamberLocalPosition
-            .clone()
-            .applyQuaternion(initialChamberPose.rotation)
-            .add(initialChamberPose.translation)
-        : null;
-    const startRotation =
-      chamberMode && initialChamberPose
-        ? initialChamberPose.rotation.clone()
-        : createRandomQuaternion(random, index);
+  const bodies = input.coins.map((coin, index) => {
     const materialProfile = createCoinMaterialProfile(random);
     microPerturbations[index] = createMicroPerturbation(random, index);
+    const rotation = quaternionFromTuple(coin.rotation);
     const body = world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(
-          chamberStartPosition?.x ?? slot * 1.02 + randomGaussianOffset(random, 0.08),
-          chamberStartPosition?.y ?? 1.42 + index * 0.1 + randomGaussianOffset(random, 0.025),
-          chamberStartPosition?.z ?? -0.22 + randomGaussianOffset(random, 0.04)
-        )
+        .setTranslation(coin.position[0], coin.position[1], coin.position[2])
         .setRotation({
-          x: startRotation.x,
-          y: startRotation.y,
-          z: startRotation.z,
-          w: startRotation.w
+          x: rotation.x,
+          y: rotation.y,
+          z: rotation.z,
+          w: rotation.w
         })
-        .setLinvel(
-          chamberMode ? 0 : randomGaussianOffset(random, 0.46),
-          chamberMode ? 0 : -0.44 + randomGaussianOffset(random, 0.16),
-          chamberMode ? 0 : 0.34 + randomGaussianOffset(random, 0.36)
-        )
+        .setLinvel(coin.linearVelocity[0], coin.linearVelocity[1], coin.linearVelocity[2])
         .setAngvel({
-          x: chamberMode ? 0 : slot * 3.2 + randomGaussianOffset(random, 9),
-          y: chamberMode ? 0 : randomGaussianOffset(random, 7),
-          z: chamberMode ? 0 : randomGaussianOffset(random, 9)
+          x: coin.angularVelocity[0],
+          y: coin.angularVelocity[1],
+          z: coin.angularVelocity[2]
         })
         .setLinearDamping(0.2)
         .setAngularDamping(0.16)
@@ -490,34 +407,8 @@ export function createCoinPhysicsSimulation(
 
   let elapsed = 0;
   let accumulator = 0;
-  let chamberReleased = !chamberMode;
-  let releasedAtElapsed = chamberMode ? Number.POSITIVE_INFINITY : 0;
   let settledFaces: [CoinFace, CoinFace, CoinFace] | null = null;
-
-  const removeChamber = () => {
-    if (chamberBody) {
-      world.removeRigidBody(chamberBody);
-    }
-  };
-
-  const updateChamberPose = () => {
-    if (!chamberBody || chamberReleased) {
-      return;
-    }
-
-    const pose = createChamberPose(chamberDrive, chamberPhaseOffset);
-    chamberBody.setNextKinematicTranslation({
-      x: pose.translation.x,
-      y: pose.translation.y,
-      z: pose.translation.z
-    });
-    chamberBody.setNextKinematicRotation({
-      x: pose.rotation.x,
-      y: pose.rotation.y,
-      z: pose.rotation.z,
-      w: pose.rotation.w
-    });
-  };
+  let settledReason: CoinPhysicsSettledReason | null = null;
 
   const readSnapshot = (): CoinPhysicsSnapshot => {
     const coins = bodies.map<SimulatedCoinSnapshot>((body) => {
@@ -535,89 +426,41 @@ export function createCoinPhysicsSimulation(
       coins,
       elapsed,
       faces: settledFaces,
-      phase: settledFaces
-        ? 'settled'
-        : chamberMode && !chamberReleased
-          ? 'contained'
-          : chamberMode
-            ? 'released'
-            : 'drop',
-      settled: settledFaces !== null
+      phase: settledFaces ? 'settled' : 'released',
+      settled: settledFaces !== null,
+      settledReason
     };
   };
 
   const detectSettledFaces = (): [CoinFace, CoinFace, CoinFace] | null => {
-    if (chamberMode && !chamberReleased) {
+    if (elapsed < SETTLED_AFTER_SECONDS) {
       return null;
     }
 
-    const settleElapsed = chamberMode ? elapsed - releasedAtElapsed : elapsed;
-
-    if (settleElapsed < SETTLED_AFTER_SECONDS) {
-      return null;
-    }
-
-    const hasCoinStandingOnEdge = bodies.some(
-      (body) => !isSettledFaceRotation(quaternionFromRapier(body.rotation()))
-    );
-
+    const rotations = bodies.map((body) => quaternionFromRapier(body.rotation()));
+    const hasStrictFace = rotations.every(isSettledFaceRotation);
     const moving = bodies.some((body) => {
       const linear = body.linvel();
       const angular = body.angvel();
-      const linearSpeed = Math.hypot(linear.x, linear.y, linear.z);
-      const angularSpeed = Math.hypot(angular.x, angular.y, angular.z);
 
-      return linearSpeed > LINEAR_SLEEP_SPEED || angularSpeed > ANGULAR_SLEEP_SPEED;
+      return (
+        Math.hypot(linear.x, linear.y, linear.z) > LINEAR_SLEEP_SPEED ||
+        Math.hypot(angular.x, angular.y, angular.z) > ANGULAR_SLEEP_SPEED
+      );
     });
 
-    if (hasCoinStandingOnEdge) {
+    if (!hasStrictFace || (moving && elapsed < FORCE_SETTLE_AFTER_SECONDS)) {
       return null;
     }
 
-    if (moving && settleElapsed < FORCE_SETTLE_AFTER_SECONDS) {
-      return null;
-    }
+    settledReason = moving ? 'timeout-readable' : 'strict';
 
-    return bodies.map((body) =>
-      coinFaceFromPhysicsRotation(quaternionFromRapier(body.rotation()))
-    ) as [CoinFace, CoinFace, CoinFace];
+    return rotations.map(coinFaceFromPhysicsRotation) as [CoinFace, CoinFace, CoinFace];
   };
 
   return {
     dispose: () => {
       world.free();
-    },
-    releaseChamber: (drive: TossDriveState) => {
-      if (!chamberMode || chamberReleased) {
-        return readSnapshot();
-      }
-
-      chamberDrive = drive;
-      chamberReleased = true;
-      releasedAtElapsed = elapsed;
-      removeChamber();
-
-      const energy = clamp(drive.energy, 0.18, 1);
-      bodies.forEach((body, index) => {
-        body.applyImpulse(
-          {
-            x: randomGaussianOffset(random, 0.18 * energy),
-            y: 0.48 * energy + randomGaussianOffset(random, 0.12),
-            z: randomGaussianOffset(random, 0.2 * energy)
-          },
-          true
-        );
-        body.applyTorqueImpulse(
-          {
-            x: (index - 1) * 0.18 + randomGaussianOffset(random, 0.16),
-            y: randomGaussianOffset(random, 0.14),
-            z: randomGaussianOffset(random, 0.18)
-          },
-          true
-        );
-      });
-
-      return readSnapshot();
     },
     snapshot: readSnapshot,
     step: (deltaSeconds: number) => {
@@ -629,22 +472,105 @@ export function createCoinPhysicsSimulation(
 
       while (accumulator >= WORLD_TIMESTEP && !settledFaces) {
         world.timestep = WORLD_TIMESTEP;
-        updateChamberPose();
         world.step();
         keepCoinsAboveTable(bodies);
-        if (!chamberMode || chamberReleased) {
-          applyMicroPerturbations(bodies, microPerturbations, chamberMode ? elapsed - releasedAtElapsed : elapsed);
-          destabilizeCoinsStandingOnEdge(bodies, chamberMode ? elapsed - releasedAtElapsed : elapsed);
-        }
+        applyMicroPerturbations(bodies, microPerturbations, elapsed);
+        destabilizeCoinsStandingOnEdge(bodies, elapsed);
         elapsed += WORLD_TIMESTEP;
         accumulator -= WORLD_TIMESTEP;
         settledFaces = detectSettledFaces();
       }
 
       return readSnapshot();
-    },
-    updateChamberDrive: (drive: TossDriveState) => {
-      chamberDrive = drive;
     }
   };
+}
+
+function createLegacyChamberCompatibilitySimulation(
+  currentThrow: number,
+  requestId: number,
+  tossSeed: number,
+  options: CoinPhysicsOptions
+): CoinPhysicsSimulation {
+  let latestDrive = options.drive ?? { elapsedSeconds: 0, energy: 0, release: false };
+  let delegate: CoinPhysicsSimulation | null = null;
+
+  const containedSnapshot = (): CoinPhysicsSnapshot => {
+    const input = createLegacyPhysicalTossInput(currentThrow, requestId, tossSeed, {
+      ...options,
+      drive: latestDrive
+    });
+
+    return {
+      coins: coinSnapshotsFromPhysicalTossInput(input),
+      elapsed: latestDrive.elapsedSeconds,
+      faces: null,
+      phase: 'contained',
+      settled: false,
+      settledReason: null
+    };
+  };
+
+  return {
+    dispose: () => {
+      delegate?.dispose();
+    },
+    releaseChamber: (drive: TossDriveState) => {
+      if (delegate) {
+        return delegate.snapshot();
+      }
+
+      latestDrive = drive;
+      delegate = createPhysicalCoinPhysicsSimulation(
+        createLegacyPhysicalTossInput(currentThrow, requestId, tossSeed, {
+          ...options,
+          drive
+        })
+      );
+
+      return delegate.snapshot();
+    },
+    snapshot: () => {
+      return delegate?.snapshot() ?? containedSnapshot();
+    },
+    step: (deltaSeconds: number) => {
+      return delegate?.step(deltaSeconds) ?? containedSnapshot();
+    },
+    updateChamberDrive: (drive: TossDriveState) => {
+      latestDrive = drive;
+    }
+  };
+}
+
+export function createCoinPhysicsSimulation(input: PhysicalTossInput): CoinPhysicsSimulation;
+// Temporary compatibility for pre-migration tabletop chamber callers.
+// Remove when UI callers move fully to PhysicalTossInput.
+export function createCoinPhysicsSimulation(
+  currentThrow: number,
+  requestId: number,
+  tossSeed?: number,
+  options?: CoinPhysicsOptions
+): CoinPhysicsSimulation;
+export function createCoinPhysicsSimulation(
+  inputOrCurrentThrow: PhysicalTossInput | number,
+  requestId = 0,
+  tossSeed = 0,
+  options: CoinPhysicsOptions = {}
+): CoinPhysicsSimulation {
+  if (typeof inputOrCurrentThrow === 'number') {
+    if (options.mode === 'chamber') {
+      return createLegacyChamberCompatibilitySimulation(
+        inputOrCurrentThrow,
+        requestId,
+        tossSeed,
+        options
+      );
+    }
+
+    return createPhysicalCoinPhysicsSimulation(
+      createLegacyPhysicalTossInput(inputOrCurrentThrow, requestId, tossSeed, options)
+    );
+  }
+
+  return createPhysicalCoinPhysicsSimulation(inputOrCurrentThrow);
 }
