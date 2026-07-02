@@ -25,7 +25,6 @@ interface TabletopSceneProps {
   currentThrow: number;
   pendingToss: PendingPhysicalToss | null;
   resultAvailable: boolean;
-  tossDriveEnergy?: number | null;
   onOpenResult: () => void;
   onPhysicalTossRequest: (input: PhysicalTossInput) => void;
   onTossSettled: (faces: [CoinFace, CoinFace, CoinFace]) => void;

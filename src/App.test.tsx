@@ -4,6 +4,55 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import * as coinTossModule from './domain/coinToss';
 
+vi.mock('./components/GestureControl', () => ({
+  default: ({
+    isCasting,
+    onGestureToss
+  }: {
+    isCasting: boolean;
+    isTossing: boolean;
+    onGestureToss: () => void;
+  }) =>
+    isCasting ? (
+      <aside aria-label="手势投掷" role="dialog">
+        <button type="button" onClick={onGestureToss}>
+          模拟手势投掷
+        </button>
+      </aside>
+    ) : null
+}));
+
+vi.mock('./components/MotionTossControl', () => ({
+  default: ({
+    isCasting,
+    onMotionDrive,
+    onMotionRelease,
+    onMotionShakeStart
+  }: {
+    isCasting: boolean;
+    isTossing: boolean;
+    onMotionDrive?: (energy: number) => void;
+    onMotionRelease: (digest: number) => void;
+    onMotionShakeStart: (seedMix: number) => void;
+  }) =>
+    isCasting ? (
+      <aside aria-label="体感投掷" role="dialog">
+        <button
+          type="button"
+          onClick={() => {
+            onMotionShakeStart(0x3344);
+            onMotionDrive?.(0.91);
+          }}
+        >
+          模拟体感蓄力
+        </button>
+        <button type="button" onClick={() => onMotionRelease(0x7788)}>
+          模拟体感释放
+        </button>
+      </aside>
+    ) : null
+}));
+
 vi.mock('./hooks/usePhysicalTossSimulation', async () => {
   const React = await import('react');
   const settleDelayMs = 2220;
@@ -213,14 +262,8 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
   });
 
-  it('generates a fresh cryptographic seed for each tabletop toss request', async () => {
+  it('maps the legacy gesture toss callback into a physical pending toss', async () => {
     const user = userEvent.setup();
-    const seeds = [0x12345678, 0x9abcdef0];
-    const getRandomValues = vi.fn((array: Uint32Array) => {
-      array[0] = seeds.shift() ?? 0;
-      return array;
-    });
-    vi.stubGlobal('crypto', { getRandomValues });
     vi.stubGlobal('fetch', vi.fn());
 
     render(<App />);
@@ -229,21 +272,46 @@ describe('App', () => {
     await startCastingWithDefaultQuestion(user);
 
     vi.useFakeTimers();
-    let tossButton = screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME });
-    fireEvent.pointerDown(tossButton, { clientX: 220, clientY: 260 });
-    fireEvent.pointerMove(tossButton, { clientX: 300, clientY: 210 });
-    fireEvent.pointerUp(tossButton, { clientX: 370, clientY: 170 });
-    await advanceTossSettlement();
-    tossButton = screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME });
-    fireEvent.pointerDown(tossButton, { clientX: 220, clientY: 260 });
-    fireEvent.pointerMove(tossButton, { clientX: 300, clientY: 210 });
-    fireEvent.pointerUp(tossButton, { clientX: 370, clientY: 170 });
+    fireEvent.click(screen.getByRole('button', { name: '模拟手势投掷' }));
 
-    expect(getRandomValues).toHaveBeenCalledTimes(2);
-    getRandomValues.mock.calls.forEach(([array]) => {
-      expect(array).toBeInstanceOf(Uint32Array);
-      expect(array).toHaveLength(1);
+    expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
+    await advanceTossSettlement();
+
+    expect(screen.getByRole('status')).toHaveTextContent('第 2 掷 / 共 6 掷');
+  });
+
+  it('maps the legacy motion release callback into a physical pending toss', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('DeviceMotionEvent', function DeviceMotionEvent() {});
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(() => ({
+        matches: true,
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        media: '(pointer: coarse)',
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn()
+      }))
     });
+    vi.stubGlobal('fetch', vi.fn());
+
+    render(<App />);
+
+    await saveAiSettings(user, { apiKey: 'sk-user' });
+    await startCastingWithDefaultQuestion(user);
+
+    const motionDriveButton = await screen.findByRole('button', { name: '模拟体感蓄力' });
+    vi.useFakeTimers();
+    fireEvent.click(motionDriveButton);
+    fireEvent.click(screen.getByRole('button', { name: '模拟体感释放' }));
+
+    expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
+    await advanceTossSettlement();
+
+    expect(screen.getByRole('status')).toHaveTextContent('第 2 掷 / 共 6 掷');
   });
 
   it('uses the user provided OpenAI settings for a Chat Completions AI reading', async () => {

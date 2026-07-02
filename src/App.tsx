@@ -12,11 +12,15 @@ import TabletopScene from './components/TabletopScene';
 import { createCoinToss } from './domain/coinToss';
 import type { AiInterpretation, CoinFace, QuestionType } from './domain/types';
 import { useCastingSession } from './hooks/useCastingSession';
-import type { PhysicalTossInput } from './physics/physicalTossInput';
+import {
+  createKeyboardPhysicalTossInput,
+  createMotionPhysicalTossInput,
+  type PhysicalTossInput,
+  type Vec3Tuple
+} from './physics/physicalTossInput';
 
 type ActiveDialog = 'ai-settings' | 'question' | 'result' | null;
 type AiSettingsState = typeof DEFAULT_AI_SETTINGS;
-type TossInteractionPhase = 'idle' | 'shaking' | 'released';
 
 interface PendingPhysicalToss {
   id: number;
@@ -55,16 +59,12 @@ export default function App() {
   const [aiInterpretation, setAiInterpretation] = useState<AiInterpretation | null>(null);
   const [aiStatus, setAiStatus] = useState<AiReadingStatus | null>(null);
   const [pendingToss, setPendingToss] = useState<PendingPhysicalToss | null>(null);
-  const [pendingTossId, setPendingTossId] = useState<number | null>(null);
-  const [pendingTossSeed, setPendingTossSeed] = useState<number | null>(null);
-  const [tossInteractionPhase, setTossInteractionPhase] =
-    useState<TossInteractionPhase>('idle');
-  const [motionTossEnergy, setMotionTossEnergy] = useState<number | null>(null);
   const [shouldOfferMotionToss, setShouldOfferMotionToss] = useState(false);
   const [aiRequestNonce, setAiRequestNonce] = useState(0);
   const nextTossIdRef = useRef(1);
   const pendingTossRef = useRef<PendingPhysicalToss | null>(null);
-  const pendingTossIdRef = useRef<number | null>(null);
+  const motionSeedMixRef = useRef(0);
+  const motionTossEnergyRef = useRef<number | null>(null);
   const isAiConfigured = hasCompleteAiSettings(aiSettings);
   const isSubmittedAiConfigured = hasCompleteAiSettings(submittedAiSettings);
   const resultAvailable = session.phase === 'result' && Boolean(session.castingResult);
@@ -72,10 +72,6 @@ export default function App() {
   useEffect(() => {
     pendingTossRef.current = pendingToss;
   }, [pendingToss]);
-
-  useEffect(() => {
-    pendingTossIdRef.current = pendingTossId;
-  }, [pendingTossId]);
 
   useEffect(() => {
     const hasDeviceMotion = typeof DeviceMotionEvent !== 'undefined';
@@ -202,11 +198,8 @@ export default function App() {
     (question: string, questionType: QuestionType) => {
       pendingTossRef.current = null;
       setPendingToss(null);
-      pendingTossIdRef.current = null;
-      setPendingTossId(null);
-      setPendingTossSeed(null);
-      setTossInteractionPhase('idle');
-      setMotionTossEnergy(null);
+      motionSeedMixRef.current = 0;
+      motionTossEnergyRef.current = null;
       nextTossIdRef.current = 1;
       setAiInterpretation(null);
       setAiStatus(null);
@@ -218,11 +211,7 @@ export default function App() {
 
   const requestPhysicalToss = useCallback(
     (input: PhysicalTossInput) => {
-      if (
-        session.phase !== 'casting' ||
-        pendingTossRef.current !== null ||
-        pendingTossIdRef.current !== null
-      ) {
+      if (session.phase !== 'casting' || pendingTossRef.current !== null) {
         return;
       }
 
@@ -231,69 +220,57 @@ export default function App() {
       const pending = { id: tossId, input };
       pendingTossRef.current = pending;
       setPendingToss(pending);
-      setMotionTossEnergy(null);
+      motionSeedMixRef.current = 0;
+      motionTossEnergyRef.current = null;
     },
     [session.phase]
   );
 
-  const beginToss = useCallback((nextPhase: TossInteractionPhase, seedMix = 0) => {
-    if (
-      session.phase !== 'casting' ||
-      pendingTossIdRef.current !== null ||
-      pendingTossRef.current !== null
-    ) {
+  const startTossShake = useCallback((seedMix = 0) => {
+    if (session.phase !== 'casting' || pendingTossRef.current !== null) {
       return;
     }
 
-    const tossId = nextTossIdRef.current;
-    const tossSeed = (createRandomTossSeed() ^ seedMix) >>> 0;
-    nextTossIdRef.current += 1;
-    pendingTossIdRef.current = tossId;
-    setPendingTossId(tossId);
-    setPendingTossSeed(tossSeed);
-    setTossInteractionPhase(nextPhase);
+    motionSeedMixRef.current = seedMix >>> 0;
   }, [session.phase]);
 
-  const startTossShake = useCallback((seedMix = 0) => {
-    beginToss('shaking', seedMix);
-  }, [beginToss]);
-
-  const releaseToss = useCallback(() => {
-    if (pendingTossIdRef.current === null) {
-      return;
-    }
-
-    setTossInteractionPhase('released');
-  }, []);
-
   const requestToss = useCallback(() => {
-    setMotionTossEnergy(null);
-    beginToss('released');
-  }, [beginToss]);
+    motionTossEnergyRef.current = null;
+    requestPhysicalToss(
+      createKeyboardPhysicalTossInput({
+        currentThrow: session.currentThrow,
+        perturbationSeed: (createRandomTossSeed() ^ session.currentThrow) >>> 0
+      })
+    );
+  }, [requestPhysicalToss, session.currentThrow]);
 
   const driveMotionToss = useCallback((energy: number) => {
-    setMotionTossEnergy(clampMotionEnergy(energy));
+    motionTossEnergyRef.current = clampMotionEnergy(energy);
   }, []);
 
   const releaseMotionToss = useCallback((digest: number) => {
-    setMotionTossEnergy((energy) => Math.max(energy ?? 0, digest > 0 ? 0.52 : 0));
-    releaseToss();
-  }, [releaseToss]);
+    const energy = Math.max(motionTossEnergyRef.current ?? 0, digest > 0 ? 0.52 : 0);
+    const digestSeed = (digest ^ motionSeedMixRef.current) >>> 0;
+    const dominantAcceleration: Vec3Tuple = [energy || 0.52, 0, -1];
+    const rotationBias: Vec3Tuple = [
+      (digest & 0xff) - 128,
+      ((digest >>> 8) & 0xff) - 128,
+      ((digest >>> 16) & 0xff) - 128
+    ];
 
-  const settleToss = useCallback((faces: [CoinFace, CoinFace, CoinFace]) => {
-    const pendingTossId = pendingTossIdRef.current;
-
-    if (pendingTossId === null) {
-      return;
-    }
-
-    pendingTossIdRef.current = null;
-    session.recordToss(createCoinToss(faces));
-    setPendingTossId(null);
-    setPendingTossSeed(null);
-    setTossInteractionPhase('idle');
-    setMotionTossEnergy(null);
-  }, [session]);
+    requestPhysicalToss(
+      createMotionPhysicalTossInput({
+        currentThrow: session.currentThrow,
+        digest,
+        dominantAcceleration,
+        durationMs: Math.round(520 + energy * 360),
+        energy,
+        peakCount: digest > 0 ? 1 : 0,
+        perturbationSeed: (createRandomTossSeed() ^ digestSeed) >>> 0,
+        rotationBias
+      })
+    );
+  }, [requestPhysicalToss, session.currentThrow]);
 
   const settlePhysicalToss = useCallback(
     (faces: [CoinFace, CoinFace, CoinFace]) => {
@@ -304,7 +281,8 @@ export default function App() {
       pendingTossRef.current = null;
       session.recordToss(createCoinToss(faces));
       setPendingToss(null);
-      setMotionTossEnergy(null);
+      motionSeedMixRef.current = 0;
+      motionTossEnergyRef.current = null;
     },
     [session]
   );
@@ -312,11 +290,8 @@ export default function App() {
   const resetCasting = useCallback(() => {
     pendingTossRef.current = null;
     setPendingToss(null);
-    pendingTossIdRef.current = null;
-    setPendingTossId(null);
-    setPendingTossSeed(null);
-    setTossInteractionPhase('idle');
-    setMotionTossEnergy(null);
+    motionSeedMixRef.current = 0;
+    motionTossEnergyRef.current = null;
     nextTossIdRef.current = 1;
     setAiInterpretation(null);
     setAiStatus(null);
@@ -342,7 +317,6 @@ export default function App() {
         currentThrow={session.currentThrow}
         pendingToss={pendingToss}
         resultAvailable={resultAvailable}
-        tossDriveEnergy={motionTossEnergy}
         onOpenResult={() => setActiveDialog('result')}
         onPhysicalTossRequest={requestPhysicalToss}
         onTossSettled={settlePhysicalToss}
@@ -351,16 +325,14 @@ export default function App() {
       {session.phase === 'casting' ? (
         <CastProgressToast
           currentThrow={session.currentThrow}
-          isAnimating={pendingToss !== null || pendingTossId !== null}
+          isAnimating={pendingToss !== null}
         />
       ) : null}
 
       {shouldOfferMotionToss ? (
         <MotionTossControl
           isCasting={session.phase === 'casting'}
-          isTossing={
-            pendingToss !== null || pendingTossId !== null || tossInteractionPhase !== 'idle'
-          }
+          isTossing={pendingToss !== null}
           onMotionDrive={driveMotionToss}
           onMotionRelease={releaseMotionToss}
           onMotionShakeStart={startTossShake}
@@ -368,9 +340,7 @@ export default function App() {
       ) : (
         <GestureControl
           isCasting={session.phase === 'casting'}
-          isTossing={
-            pendingToss !== null || pendingTossId !== null || tossInteractionPhase !== 'idle'
-          }
+          isTossing={pendingToss !== null}
           onGestureToss={requestToss}
         />
       )}
