@@ -183,6 +183,59 @@ describe('MotionTossControl', () => {
     });
   });
 
+  it('ignores pending-toss motion without poisoning the next motion toss', async () => {
+    const user = userEvent.setup();
+    const onPhysicalTossRequest = vi.fn();
+    stubDeviceMotionSupport();
+
+    const { rerender } = render(
+      <MotionTossControl
+        currentThrow={1}
+        isCasting={true}
+        isTossing={false}
+        onPhysicalTossRequest={onPhysicalTossRequest}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '启用体感投掷' }));
+
+    rerender(
+      <MotionTossControl
+        currentThrow={1}
+        isCasting={true}
+        isTossing={true}
+        onPhysicalTossRequest={onPhysicalTossRequest}
+      />
+    );
+
+    act(() => {
+      dispatchDeviceMotionSample(0, { x: 18, y: 0, z: 0 }, { alpha: 160 });
+      dispatchDeviceMotionSample(820, { x: 0, y: 0, z: 0 }, { alpha: 0 });
+    });
+
+    expect(onPhysicalTossRequest).not.toHaveBeenCalled();
+
+    rerender(
+      <MotionTossControl
+        currentThrow={2}
+        isCasting={true}
+        isTossing={false}
+        onPhysicalTossRequest={onPhysicalTossRequest}
+      />
+    );
+
+    act(() => {
+      dispatchDeviceMotionSample(1000, { x: 19, y: 0, z: 0 }, { alpha: 170 });
+      dispatchDeviceMotionSample(1820, { x: 0, y: 0, z: 0 }, { alpha: 0 });
+    });
+
+    expect(onPhysicalTossRequest).toHaveBeenCalledTimes(1);
+    expect(onPhysicalTossRequest.mock.calls[0][0]).toMatchObject({
+      source: 'motion',
+      currentThrow: 2
+    });
+  });
+
   it('does not start listening when motion permission is denied', async () => {
     const user = userEvent.setup();
     const requestPermission = vi.fn(async () => 'denied' as const);

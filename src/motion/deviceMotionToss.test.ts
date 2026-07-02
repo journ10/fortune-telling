@@ -68,6 +68,51 @@ describe('createDeviceMotionTossDetector', () => {
     expect(result.summary?.energy).toBeGreaterThan(0);
   });
 
+  it('keeps below-stop quiet samples out of the release strength summary', () => {
+    const detector = createDeviceMotionTossDetector({ quietWindowMs: 600 });
+
+    const firstActive = detector.update({
+      timestamp: 0,
+      accelerationMagnitude: 20,
+      accelerationVector: [20, 0, 0],
+      rotationMagnitude: 120,
+      rotationVector: [120, 0, 0]
+    });
+    const secondActive = detector.update({
+      timestamp: 120,
+      accelerationMagnitude: 18,
+      accelerationVector: [18, 0, 0],
+      rotationMagnitude: 90,
+      rotationVector: [90, 0, 0]
+    });
+    const activeEnergy = firstActive.energy + secondActive.energy;
+
+    for (let timestamp = 180; timestamp < 720; timestamp += 60) {
+      detector.update({
+        timestamp,
+        accelerationMagnitude: 2.52,
+        accelerationVector: [0, 2.52, 0],
+        rotationMagnitude: 0,
+        rotationVector: [0, 0, 0]
+      });
+    }
+
+    const result = detector.update({
+      timestamp: 820,
+      accelerationMagnitude: 0,
+      accelerationVector: [0, 0, 0],
+      rotationMagnitude: 0,
+      rotationVector: [0, 0, 0]
+    });
+
+    expect(result.state).toBe('released');
+    expect(result.summary).toMatchObject({
+      durationMs: 820,
+      peakCount: 1
+    });
+    expect(result.summary?.energy).toBeCloseTo(activeEnergy, 5);
+  });
+
   it('does not depend on one acceleration axis to detect shaking', () => {
     const detector = createDeviceMotionTossDetector();
 

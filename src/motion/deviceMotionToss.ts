@@ -189,14 +189,15 @@ export function createDeviceMotionTossDetector(
       return createResult(energy);
     }
 
-    digest = mixSampleDigest(digest, sample, energy);
-    trackShakingSample(sample, energy);
-
     if (energy >= stopThreshold) {
+      digest = mixSampleDigest(digest, sample, energy);
+      trackShakingSample(sample, energy);
       lastActiveTimestamp = timestamp;
     } else if (timestamp - lastActiveTimestamp >= quietWindowMs) {
       state = 'released';
       releasedSummary = createSummary(timestamp);
+    } else {
+      lastEnergy = energy;
     }
 
     return createResult(energy);

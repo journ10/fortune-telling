@@ -125,6 +125,7 @@ export default function MotionTossControl({
   const hasReleasedRef = useRef(false);
   const isListeningRef = useRef(false);
   const isTossingRef = useRef(isTossing);
+  const previousIsTossingRef = useRef(isTossing);
   const lastGravityVectorRef = useRef<MotionVector | null>(null);
   const onMotionDriveRef = useRef(onMotionDrive);
   const onPhysicalTossRequestRef = useRef(onPhysicalTossRequest);
@@ -135,8 +136,19 @@ export default function MotionTossControl({
   }, [currentThrow]);
 
   useEffect(() => {
+    const wasTossing = previousIsTossingRef.current;
+
     isTossingRef.current = isTossing;
-  }, [isTossing]);
+
+    if (!isTossing && (wasTossing || hasReleasedRef.current)) {
+      detectorRef.current.reset();
+      hasStartedRef.current = false;
+      hasReleasedRef.current = false;
+      lastGravityVectorRef.current = null;
+    }
+
+    previousIsTossingRef.current = isTossing;
+  }, [currentThrow, isTossing]);
 
   useEffect(() => {
     onMotionDriveRef.current = onMotionDrive;
@@ -147,6 +159,10 @@ export default function MotionTossControl({
   }, [onPhysicalTossRequest]);
 
   const handleDeviceMotion = useCallback((event: DeviceMotionEvent) => {
+    if (isTossingRef.current) {
+      return;
+    }
+
     const { nextGravityVector, sample } = createSampleFromEvent(event, lastGravityVectorRef.current);
     lastGravityVectorRef.current = nextGravityVector;
 
@@ -254,15 +270,6 @@ export default function MotionTossControl({
       setMode('prompt');
     }
   }, [cleanupSession, isCasting]);
-
-  useEffect(() => {
-    if (!isTossing && hasReleasedRef.current) {
-      detectorRef.current.reset();
-      hasStartedRef.current = false;
-      hasReleasedRef.current = false;
-      lastGravityVectorRef.current = null;
-    }
-  }, [currentThrow, isTossing]);
 
   useEffect(() => cleanupSession, [cleanupSession]);
 
