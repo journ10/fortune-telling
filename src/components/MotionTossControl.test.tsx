@@ -51,10 +51,10 @@ describe('MotionTossControl', () => {
 
     render(
       <MotionTossControl
+        currentThrow={1}
         isCasting={true}
         isTossing={false}
-        onMotionRelease={vi.fn()}
-        onMotionShakeStart={vi.fn()}
+        onPhysicalTossRequest={vi.fn()}
       />
     );
 
@@ -67,10 +67,10 @@ describe('MotionTossControl', () => {
 
     render(
       <MotionTossControl
+        currentThrow={1}
         isCasting={false}
         isTossing={false}
-        onMotionRelease={vi.fn()}
-        onMotionShakeStart={vi.fn()}
+        onPhysicalTossRequest={vi.fn()}
       />
     );
 
@@ -84,10 +84,10 @@ describe('MotionTossControl', () => {
 
     render(
       <MotionTossControl
+        currentThrow={1}
         isCasting={true}
         isTossing={false}
-        onMotionRelease={vi.fn()}
-        onMotionShakeStart={vi.fn()}
+        onPhysicalTossRequest={vi.fn()}
       />
     );
 
@@ -99,18 +99,19 @@ describe('MotionTossControl', () => {
     expect(screen.getByRole('status')).toHaveTextContent('体感监听已启用');
   });
 
-  it('listens to devicemotion and releases with a digest after the quiet window', async () => {
+  it('listens to devicemotion and releases with a physical toss request after the quiet window', async () => {
     const user = userEvent.setup();
-    const onMotionShakeStart = vi.fn();
-    const onMotionRelease = vi.fn();
+    const onMotionDrive = vi.fn();
+    const onPhysicalTossRequest = vi.fn();
     stubDeviceMotionSupport();
 
     render(
       <MotionTossControl
+        currentThrow={1}
         isCasting={true}
         isTossing={false}
-        onMotionRelease={onMotionRelease}
-        onMotionShakeStart={onMotionShakeStart}
+        onMotionDrive={onMotionDrive}
+        onPhysicalTossRequest={onPhysicalTossRequest}
       />
     );
 
@@ -119,7 +120,7 @@ describe('MotionTossControl', () => {
     act(() => {
       dispatchDeviceMotionSample(0, { x: 18, y: 0, z: 0 }, { alpha: 160 });
     });
-    expect(onMotionShakeStart).toHaveBeenCalledTimes(1);
+    expect(onMotionDrive).toHaveBeenCalled();
 
     act(() => {
       dispatchDeviceMotionSample(120, { x: 20, y: 3, z: 0 }, { alpha: 140 });
@@ -127,24 +128,73 @@ describe('MotionTossControl', () => {
     });
 
     await waitFor(() => {
-      expect(onMotionRelease).toHaveBeenCalledTimes(1);
+      expect(onPhysicalTossRequest).toHaveBeenCalledTimes(1);
     });
-    expect(onMotionRelease).toHaveBeenCalledWith(expect.any(Number));
-    expect(onMotionRelease.mock.calls[0][0]).toBeGreaterThan(0);
+    expect(onPhysicalTossRequest.mock.calls[0][0]).toMatchObject({
+      source: 'motion',
+      currentThrow: 1,
+      durationMs: 820
+    });
+    expect(onPhysicalTossRequest.mock.calls[0][0].energy).toBeGreaterThan(0);
+    expect(onPhysicalTossRequest.mock.calls[0][0].coins).toHaveLength(3);
+  });
+
+  it('resets after release so another motion toss can start in the same casting', async () => {
+    const user = userEvent.setup();
+    const onPhysicalTossRequest = vi.fn();
+    stubDeviceMotionSupport();
+
+    const { rerender } = render(
+      <MotionTossControl
+        currentThrow={1}
+        isCasting={true}
+        isTossing={false}
+        onPhysicalTossRequest={onPhysicalTossRequest}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '启用体感投掷' }));
+
+    act(() => {
+      dispatchDeviceMotionSample(0, { x: 18, y: 0, z: 0 }, { alpha: 160 });
+      dispatchDeviceMotionSample(820, { x: 0, y: 0, z: 0 }, { alpha: 0 });
+    });
+
+    expect(onPhysicalTossRequest).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <MotionTossControl
+        currentThrow={2}
+        isCasting={true}
+        isTossing={false}
+        onPhysicalTossRequest={onPhysicalTossRequest}
+      />
+    );
+
+    act(() => {
+      dispatchDeviceMotionSample(1000, { x: 19, y: 0, z: 0 }, { alpha: 170 });
+      dispatchDeviceMotionSample(1820, { x: 0, y: 0, z: 0 }, { alpha: 0 });
+    });
+
+    expect(onPhysicalTossRequest).toHaveBeenCalledTimes(2);
+    expect(onPhysicalTossRequest.mock.calls[1][0]).toMatchObject({
+      source: 'motion',
+      currentThrow: 2
+    });
   });
 
   it('does not start listening when motion permission is denied', async () => {
     const user = userEvent.setup();
     const requestPermission = vi.fn(async () => 'denied' as const);
-    const onMotionShakeStart = vi.fn();
+    const onPhysicalTossRequest = vi.fn();
     stubDeviceMotionSupport(requestPermission);
 
     render(
       <MotionTossControl
+        currentThrow={1}
         isCasting={true}
         isTossing={false}
-        onMotionRelease={vi.fn()}
-        onMotionShakeStart={onMotionShakeStart}
+        onPhysicalTossRequest={onPhysicalTossRequest}
       />
     );
 
@@ -156,20 +206,20 @@ describe('MotionTossControl', () => {
       dispatchDeviceMotionSample(0, { x: 18, y: 0, z: 0 }, { alpha: 160 });
     });
 
-    expect(onMotionShakeStart).not.toHaveBeenCalled();
+    expect(onPhysicalTossRequest).not.toHaveBeenCalled();
   });
 
   it('reports unsupported browsers without adding a motion listener', async () => {
     const user = userEvent.setup();
-    const onMotionShakeStart = vi.fn();
+    const onPhysicalTossRequest = vi.fn();
     vi.stubGlobal('DeviceMotionEvent', undefined);
 
     render(
       <MotionTossControl
+        currentThrow={1}
         isCasting={true}
         isTossing={false}
-        onMotionRelease={vi.fn()}
-        onMotionShakeStart={onMotionShakeStart}
+        onPhysicalTossRequest={onPhysicalTossRequest}
       />
     );
 
@@ -181,6 +231,6 @@ describe('MotionTossControl', () => {
       dispatchDeviceMotionSample(0, { x: 18, y: 0, z: 0 }, { alpha: 160 });
     });
 
-    expect(onMotionShakeStart).not.toHaveBeenCalled();
+    expect(onPhysicalTossRequest).not.toHaveBeenCalled();
   });
 });

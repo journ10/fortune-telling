@@ -1,15 +1,27 @@
 export type DeviceMotionTossState = 'idle' | 'shaking' | 'released';
 
+export interface DeviceMotionTossSummary {
+  durationMs: number;
+  energy: number;
+  digest: number;
+  peakCount: number;
+  dominantAcceleration: [number, number, number];
+  rotationBias: [number, number, number];
+}
+
 export interface DeviceMotionSample {
   timestamp: number;
   accelerationMagnitude: number;
   rotationMagnitude: number;
+  accelerationVector?: [number, number, number];
+  rotationVector?: [number, number, number];
 }
 
 export interface DeviceMotionTossResult {
   state: DeviceMotionTossState;
   energy: number;
   digest: number;
+  summary: DeviceMotionTossSummary | null;
 }
 
 export interface DeviceMotionTossOptions {
@@ -40,6 +52,35 @@ function calculateEnergy(sample: DeviceMotionSample): number {
   const rotationEnergy = finiteMagnitude(sample.rotationMagnitude) / ROTATION_ENERGY_SCALE;
 
   return accelerationEnergy + rotationEnergy;
+}
+
+function addWeightedVector(
+  total: [number, number, number],
+  vector: [number, number, number] | undefined,
+  weight: number
+): [number, number, number] {
+  if (!vector) {
+    return total;
+  }
+
+  return [
+    total[0] + vector[0] * weight,
+    total[1] + vector[1] * weight,
+    total[2] + vector[2] * weight
+  ];
+}
+
+function normalizeVector(
+  vector: [number, number, number],
+  fallback: [number, number, number]
+): [number, number, number] {
+  const length = Math.hypot(vector[0], vector[1], vector[2]);
+
+  if (length < 0.0001) {
+    return fallback;
+  }
+
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
 }
 
 function mixWord(hash: number, word: number): number {
@@ -78,11 +119,53 @@ export function createDeviceMotionTossDetector(
   let state: DeviceMotionTossState = 'idle';
   let digest = 0;
   let lastActiveTimestamp = 0;
+  let startedAt = 0;
+  let totalEnergy = 0;
+  let peakCount = 0;
+  let lastEnergy = 0;
+  let accelerationTotal: [number, number, number] = [0, 0, 0];
+  let rotationTotal: [number, number, number] = [0, 0, 0];
+  let releasedSummary: DeviceMotionTossSummary | null = null;
+
+  const createSummary = (timestamp: number): DeviceMotionTossSummary => ({
+    durationMs: timestamp - startedAt,
+    energy: totalEnergy,
+    digest,
+    peakCount,
+    dominantAcceleration: normalizeVector(accelerationTotal, [1, 0, 0]),
+    rotationBias: rotationTotal
+  });
+
+  const createResult = (energy: number): DeviceMotionTossResult => ({
+    state,
+    energy,
+    digest,
+    summary: state === 'released' ? releasedSummary : null
+  });
+
+  const trackShakingSample = (sample: DeviceMotionSample, energy: number) => {
+    totalEnergy += energy;
+    accelerationTotal = addWeightedVector(accelerationTotal, sample.accelerationVector, energy);
+    rotationTotal = addWeightedVector(rotationTotal, sample.rotationVector, 1);
+
+    if (energy > startThreshold && lastEnergy <= startThreshold) {
+      peakCount += 1;
+    }
+
+    lastEnergy = energy;
+  };
 
   const reset = () => {
     state = 'idle';
     digest = 0;
     lastActiveTimestamp = 0;
+    startedAt = 0;
+    totalEnergy = 0;
+    peakCount = 0;
+    lastEnergy = 0;
+    accelerationTotal = [0, 0, 0];
+    rotationTotal = [0, 0, 0];
+    releasedSummary = null;
   };
 
   const update = (sample: DeviceMotionSample): DeviceMotionTossResult => {
@@ -90,29 +173,33 @@ export function createDeviceMotionTossDetector(
     const energy = calculateEnergy(sample);
 
     if (state === 'released') {
-      return { state, energy, digest };
+      return createResult(energy);
     }
 
     if (state === 'idle') {
       if (energy < startThreshold) {
-        return { state, energy, digest };
+        return createResult(energy);
       }
 
       state = 'shaking';
+      startedAt = timestamp;
       lastActiveTimestamp = timestamp;
       digest = mixSampleDigest(digest, sample, energy);
-      return { state, energy, digest };
+      trackShakingSample(sample, energy);
+      return createResult(energy);
     }
 
     digest = mixSampleDigest(digest, sample, energy);
+    trackShakingSample(sample, energy);
 
     if (energy >= stopThreshold) {
       lastActiveTimestamp = timestamp;
     } else if (timestamp - lastActiveTimestamp >= quietWindowMs) {
       state = 'released';
+      releasedSummary = createSummary(timestamp);
     }
 
-    return { state, energy, digest };
+    return createResult(energy);
   };
 
   return { reset, update };

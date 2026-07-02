@@ -343,11 +343,11 @@ export default function App() {
 
       {shouldOfferMotionToss ? (
         <MotionTossControl
+          currentThrow={session.currentThrow}
           isCasting={session.phase === 'casting'}
           isTossing={pendingToss !== null}
           onMotionDrive={driveMotionToss}
-          onMotionRelease={releaseMotionToss}
-          onMotionShakeStart={startTossShake}
+          onPhysicalTossRequest={requestPhysicalToss}
         />
       ) : (
         <GestureControl

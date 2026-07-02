@@ -39,33 +39,48 @@ vi.mock('./components/GestureControl', () => ({
 
 vi.mock('./components/MotionTossControl', () => ({
   default: ({
+    currentThrow,
     isCasting,
     onMotionDrive,
-    onMotionRelease,
-    onMotionShakeStart
+    onPhysicalTossRequest
   }: {
+    currentThrow: number;
     isCasting: boolean;
     isTossing: boolean;
     onMotionDrive?: (energy: number) => void;
-    onMotionRelease: (digest: number) => void;
-    onMotionShakeStart: (seedMix: number) => void;
-  }) =>
-    isCasting ? (
+    onPhysicalTossRequest: (input: PhysicalTossInput) => void;
+  }) => {
+    const createCoin = (slot: number) => ({
+      position: [slot * 0.2, 1 + slot * 0.05, -0.1] as [number, number, number],
+      rotation: [0, slot * 0.25, 0, 1] as [number, number, number, number],
+      linearVelocity: [0.2 + slot * 0.05, 2.2, -0.4] as [number, number, number],
+      angularVelocity: [2.4 + slot, 0.6, 1.1] as [number, number, number]
+    });
+
+    return isCasting ? (
       <aside aria-label="体感投掷" role="dialog">
-        <button
-          type="button"
-          onClick={() => {
-            onMotionShakeStart(0x3344);
-            onMotionDrive?.(0.91);
-          }}
-        >
+        <button type="button" onClick={() => onMotionDrive?.(0.91)}>
           模拟体感蓄力
         </button>
-        <button type="button" onClick={() => onMotionRelease(0x7788)}>
+        <button
+          type="button"
+          onClick={() =>
+            onPhysicalTossRequest({
+              source: 'motion',
+              currentThrow,
+              coins: [createCoin(0), createCoin(1), createCoin(2)],
+              energy: 0.91,
+              durationMs: 820,
+              perturbationSeed: 0x7788,
+              perturbationScale: 0.05
+            })
+          }
+        >
           模拟体感释放
         </button>
       </aside>
-    ) : null
+    ) : null;
+  }
 }));
 
 vi.mock('./hooks/usePhysicalTossSimulation', async () => {
@@ -346,7 +361,7 @@ describe('App', () => {
     expect(screen.getByRole('status')).toHaveTextContent('第 2 掷 / 共 6 掷');
   });
 
-  it('maps the legacy motion release callback into a physical pending toss', async () => {
+  it('maps a motion physical toss request into a physical pending toss', async () => {
     const user = userEvent.setup();
     vi.stubGlobal('DeviceMotionEvent', function DeviceMotionEvent() {});
     Object.defineProperty(window, 'matchMedia', {

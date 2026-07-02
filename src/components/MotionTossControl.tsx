@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createDeviceMotionTossDetector, type DeviceMotionSample } from '../motion/deviceMotionToss';
+import { createMotionPhysicalTossInput, type PhysicalTossInput } from '../physics/physicalTossInput';
 
 interface MotionTossControlProps {
+  currentThrow: number;
   isCasting: boolean;
   isTossing: boolean;
   onMotionDrive?: (energy: number) => void;
-  onMotionShakeStart: (seedMix: number) => void;
-  onMotionRelease: (digest: number) => void;
+  onPhysicalTossRequest: (input: PhysicalTossInput) => void;
 }
 
 type MotionMode = 'prompt' | 'requesting' | 'active' | 'error';
@@ -75,14 +76,18 @@ function createSampleFromEvent(
 ): { nextGravityVector: MotionVector | null; sample: DeviceMotionSample } {
   const acceleration = readVector(event.acceleration);
   const gravityVector = readVector(event.accelerationIncludingGravity);
+  const gravityDelta =
+    gravityVector && previousGravityVector
+      ? {
+          x: gravityVector.x - previousGravityVector.x,
+          y: gravityVector.y - previousGravityVector.y,
+          z: gravityVector.z - previousGravityVector.z
+        }
+      : null;
   let accelerationMagnitude = acceleration ? vectorMagnitude(acceleration) : 0;
 
-  if (!acceleration && gravityVector && previousGravityVector) {
-    accelerationMagnitude = vectorMagnitude({
-      x: gravityVector.x - previousGravityVector.x,
-      y: gravityVector.y - previousGravityVector.y,
-      z: gravityVector.z - previousGravityVector.z
-    });
+  if (!acceleration && gravityDelta) {
+    accelerationMagnitude = vectorMagnitude(gravityDelta);
   }
 
   return {
@@ -90,30 +95,44 @@ function createSampleFromEvent(
     sample: {
       timestamp: Number.isFinite(event.timeStamp) ? event.timeStamp : performance.now(),
       accelerationMagnitude,
-      rotationMagnitude: readRotationMagnitude(event.rotationRate)
+      accelerationVector: acceleration
+        ? [acceleration.x, acceleration.y, acceleration.z]
+        : gravityDelta
+          ? [gravityDelta.x, gravityDelta.y, gravityDelta.z]
+          : [0, 0, 0],
+      rotationMagnitude: readRotationMagnitude(event.rotationRate),
+      rotationVector: [
+        readAxis(event.rotationRate?.alpha) ?? 0,
+        readAxis(event.rotationRate?.beta) ?? 0,
+        readAxis(event.rotationRate?.gamma) ?? 0
+      ]
     }
   };
 }
 
 export default function MotionTossControl({
+  currentThrow,
   isCasting,
   isTossing,
   onMotionDrive,
-  onMotionRelease,
-  onMotionShakeStart
+  onPhysicalTossRequest
 }: MotionTossControlProps) {
   const [mode, setMode] = useState<MotionMode>('prompt');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const detectorRef = useRef(createDeviceMotionTossDetector());
+  const currentThrowRef = useRef(currentThrow);
   const hasStartedRef = useRef(false);
   const hasReleasedRef = useRef(false);
   const isListeningRef = useRef(false);
   const isTossingRef = useRef(isTossing);
   const lastGravityVectorRef = useRef<MotionVector | null>(null);
   const onMotionDriveRef = useRef(onMotionDrive);
-  const onMotionReleaseRef = useRef(onMotionRelease);
-  const onMotionShakeStartRef = useRef(onMotionShakeStart);
+  const onPhysicalTossRequestRef = useRef(onPhysicalTossRequest);
   const permissionTokenRef = useRef(0);
+
+  useEffect(() => {
+    currentThrowRef.current = currentThrow;
+  }, [currentThrow]);
 
   useEffect(() => {
     isTossingRef.current = isTossing;
@@ -124,12 +143,8 @@ export default function MotionTossControl({
   }, [onMotionDrive]);
 
   useEffect(() => {
-    onMotionReleaseRef.current = onMotionRelease;
-  }, [onMotionRelease]);
-
-  useEffect(() => {
-    onMotionShakeStartRef.current = onMotionShakeStart;
-  }, [onMotionShakeStart]);
+    onPhysicalTossRequestRef.current = onPhysicalTossRequest;
+  }, [onPhysicalTossRequest]);
 
   const handleDeviceMotion = useCallback((event: DeviceMotionEvent) => {
     const { nextGravityVector, sample } = createSampleFromEvent(event, lastGravityVectorRef.current);
@@ -141,12 +156,22 @@ export default function MotionTossControl({
 
     if (result.state === 'shaking' && !hasStartedRef.current && !isTossingRef.current) {
       hasStartedRef.current = true;
-      onMotionShakeStartRef.current(result.digest);
     }
 
-    if (result.state === 'released' && hasStartedRef.current && !hasReleasedRef.current) {
+    if (result.state === 'released' && result.summary && hasStartedRef.current && !hasReleasedRef.current) {
       hasReleasedRef.current = true;
-      onMotionReleaseRef.current(result.digest);
+      onPhysicalTossRequestRef.current(
+        createMotionPhysicalTossInput({
+          currentThrow: currentThrowRef.current,
+          durationMs: result.summary.durationMs,
+          energy: result.summary.energy,
+          digest: result.summary.digest,
+          peakCount: result.summary.peakCount,
+          dominantAcceleration: result.summary.dominantAcceleration,
+          rotationBias: result.summary.rotationBias,
+          perturbationSeed: result.summary.digest ^ Math.floor(performance.now())
+        })
+      );
     }
   }, []);
 
@@ -229,6 +254,15 @@ export default function MotionTossControl({
       setMode('prompt');
     }
   }, [cleanupSession, isCasting]);
+
+  useEffect(() => {
+    if (!isTossing && hasReleasedRef.current) {
+      detectorRef.current.reset();
+      hasStartedRef.current = false;
+      hasReleasedRef.current = false;
+      lastGravityVectorRef.current = null;
+    }
+  }, [currentThrow, isTossing]);
 
   useEffect(() => cleanupSession, [cleanupSession]);
 

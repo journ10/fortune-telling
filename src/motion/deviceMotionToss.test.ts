@@ -7,7 +7,7 @@ describe('createDeviceMotionTossDetector', () => {
 
     expect(
       detector.update({ timestamp: 0, accelerationMagnitude: 0.2, rotationMagnitude: 0 })
-    ).toMatchObject({ state: 'idle' });
+    ).toMatchObject({ state: 'idle', summary: null });
 
     const result = detector.update({
       timestamp: 80,
@@ -18,6 +18,7 @@ describe('createDeviceMotionTossDetector', () => {
     expect(result.state).toBe('shaking');
     expect(result.energy).toBeGreaterThan(1);
     expect(result.digest).toBeGreaterThan(0);
+    expect(result.summary).toBeNull();
   });
 
   it('releases after a quiet window following shaking', () => {
@@ -31,12 +32,48 @@ describe('createDeviceMotionTossDetector', () => {
     ).toMatchObject({ state: 'released' });
   });
 
+  it('returns a release summary for physical toss mapping', () => {
+    const detector = createDeviceMotionTossDetector({ quietWindowMs: 600 });
+
+    detector.update({
+      timestamp: 0,
+      accelerationMagnitude: 20,
+      accelerationVector: [18, 4, 2],
+      rotationMagnitude: 140,
+      rotationVector: [120, 40, 55]
+    });
+    detector.update({
+      timestamp: 120,
+      accelerationMagnitude: 22,
+      accelerationVector: [20, 5, 2],
+      rotationMagnitude: 110,
+      rotationVector: [90, 30, 45]
+    });
+    const result = detector.update({
+      timestamp: 820,
+      accelerationMagnitude: 0.2,
+      accelerationVector: [0.2, 0, 0],
+      rotationMagnitude: 1,
+      rotationVector: [1, 0, 0]
+    });
+
+    expect(result.state).toBe('released');
+    expect(result.summary).toMatchObject({
+      durationMs: 820,
+      peakCount: expect.any(Number),
+      dominantAcceleration: expect.any(Array),
+      rotationBias: expect.any(Array),
+      digest: expect.any(Number)
+    });
+    expect(result.summary?.energy).toBeGreaterThan(0);
+  });
+
   it('does not depend on one acceleration axis to detect shaking', () => {
     const detector = createDeviceMotionTossDetector();
 
     expect(
       detector.update({ timestamp: 40, accelerationMagnitude: 0, rotationMagnitude: 260 })
-    ).toMatchObject({ state: 'shaking' });
+    ).toMatchObject({ state: 'shaking', summary: null });
   });
 
   it('produces a deterministic motion digest from sampled energy', () => {
@@ -70,6 +107,6 @@ describe('createDeviceMotionTossDetector', () => {
 
     expect(
       detector.update({ timestamp: 1000, accelerationMagnitude: 0, rotationMagnitude: 0 })
-    ).toEqual({ state: 'idle', energy: 0, digest: 0 });
+    ).toEqual({ state: 'idle', energy: 0, digest: 0, summary: null });
   });
 });
