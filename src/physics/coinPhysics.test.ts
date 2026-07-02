@@ -19,7 +19,7 @@ import {
   type CoinPhysicsSnapshot
 } from './coinPhysics';
 import { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS } from './coinGeometry';
-import { createPointerPhysicalTossInput } from './physicalTossInput';
+import { createPointerPhysicalTossInput, type PhysicalTossInput } from './physicalTossInput';
 
 function createTestPhysicalInput(seed = 0x51f15eed) {
   return createPointerPhysicalTossInput({
@@ -195,6 +195,79 @@ describe('coinPhysics', () => {
     simulation.dispose();
   });
 
+  it('uses timeout-readable settlement from body rotations instead of generated faces', async () => {
+    await initCoinPhysics();
+    const input = createPointerPhysicalTossInput({
+      currentThrow: 5,
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0x9090abcd,
+      samples: [
+        { x: 320, y: 240, timestamp: 0 },
+        { x: 321, y: 240, timestamp: 220 }
+      ]
+    });
+    const simulation = createCoinPhysicsSimulation(input);
+    let snapshot = simulation.snapshot();
+
+    for (let step = 0; step < 1200 && !snapshot.settled; step += 1) {
+      snapshot = simulation.step(1 / 60);
+    }
+
+    expect(snapshot.settled).toBe(true);
+    expect(['strict', 'timeout-readable']).toContain(snapshot.settledReason);
+    expect(snapshot.faces).toHaveLength(3);
+    snapshot.faces?.forEach((face, index) => {
+      expect(face).toBe(coinFaceFromPhysicsRotation(snapshot.coins[index].physicsRotation));
+    });
+
+    simulation.dispose();
+  });
+
+  it('uses timeout-readable settlement while bodies are readable but still moving', async () => {
+    await initCoinPhysics();
+    const readableTilt = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(Math.acos(0.8), 0, 0)
+    );
+    const input: PhysicalTossInput = {
+      source: 'pointer',
+      currentThrow: 5,
+      coins: [-1, 0, 1].map((slot) => ({
+        position: [slot * 1.3, 0.82, 0],
+        rotation: [readableTilt.x, readableTilt.y, readableTilt.z, readableTilt.w],
+        linearVelocity: [0, 30, 0],
+        angularVelocity: [0, 8, 0]
+      })) as PhysicalTossInput['coins'],
+      durationMs: 220,
+      energy: 0.32,
+      perturbationScale: 0.035,
+      perturbationSeed: 0x9090abcd
+    };
+    const simulation = createCoinPhysicsSimulation(input);
+    let snapshot = simulation.snapshot();
+
+    for (let step = 0; step < 1200 && !snapshot.settled; step += 1) {
+      snapshot = simulation.step(1 / 60);
+    }
+
+    const faceNormalYs = snapshot.coins.map((coin) =>
+      Math.abs(physicsFaceNormalY(coin.physicsRotation))
+    );
+
+    expect(snapshot.settled).toBe(true);
+    expect(snapshot.settledReason).toBe('timeout-readable');
+    expect(snapshot.elapsed).toBeGreaterThanOrEqual(5.5);
+    expect(snapshot.elapsed).toBeLessThan(5.6);
+    expect(faceNormalYs.every((normalY) => normalY >= 0.72)).toBe(true);
+    expect(faceNormalYs.some((normalY) => normalY < 0.99)).toBe(true);
+    expect(snapshot.faces).toHaveLength(3);
+    snapshot.faces?.forEach((face, index) => {
+      expect(face).toBe(coinFaceFromPhysicsRotation(snapshot.coins[index].physicsRotation));
+    });
+
+    simulation.dispose();
+  });
+
   it('creates three simulated coin bodies whose results come from final physics rotations', async () => {
     await initCoinPhysics();
     const snapshot = stepUntilSettled(createScenarioPhysicalInput(4, 9));
@@ -338,7 +411,7 @@ describe('coinPhysics', () => {
     }
   });
 
-  it('does not settle while a coin is still visibly tilted off the tabletop', async () => {
+  it('does not settle while a coin face is still unreadable from the tabletop', async () => {
     await initCoinPhysics();
 
     for (let currentThrow = 1; currentThrow <= 6; currentThrow += 1) {
@@ -346,11 +419,19 @@ describe('coinPhysics', () => {
         const snapshot = stepUntilSettled(createScenarioPhysicalInput(currentThrow, requestId));
 
         expect(snapshot.settled, `throw ${currentThrow}, request ${requestId}`).toBe(true);
+        expect(
+          snapshot.settledReason,
+          `throw ${currentThrow}, request ${requestId}`
+        ).not.toBeNull();
+
+        const minimumReadableNormalY =
+          snapshot.settledReason === 'timeout-readable' ? 0.72 : 0.99;
+
         snapshot.coins.forEach((coin) => {
           expect(
             Math.abs(physicsFaceNormalY(coin.physicsRotation)),
             `throw ${currentThrow}, request ${requestId}`
-          ).toBeGreaterThanOrEqual(0.99);
+          ).toBeGreaterThanOrEqual(minimumReadableNormalY);
         });
       }
     }

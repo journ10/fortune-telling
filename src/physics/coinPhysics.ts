@@ -16,6 +16,8 @@ const FORCE_SETTLE_AFTER_SECONDS = 4.25;
 const LINEAR_SLEEP_SPEED = 0.13;
 const ANGULAR_SLEEP_SPEED = 0.55;
 const SETTLED_FACE_NORMAL_Y = 0.99;
+const READABLE_AFTER_SECONDS = 5.5;
+const READABLE_FACE_NORMAL_Y = 0.72;
 const EDGE_DESTABILIZE_AFTER_SECONDS = 1.15;
 const EDGE_DESTABILIZE_MAX_CENTER_Y = TABLETOP_COIN_RADIUS * 1.16;
 const EDGE_DESTABILIZE_IMPULSE = 0.08;
@@ -210,6 +212,16 @@ function physicsFaceNormalY(rotation: THREE.Quaternion): number {
 
 function isSettledFaceRotation(rotation: THREE.Quaternion): boolean {
   return Math.abs(physicsFaceNormalY(rotation)) >= SETTLED_FACE_NORMAL_Y;
+}
+
+function isReadableFaceRotation(rotation: THREE.Quaternion): boolean {
+  return Math.abs(physicsFaceNormalY(rotation)) >= READABLE_FACE_NORMAL_Y;
+}
+
+function readFacesFromBodies(bodies: readonly RAPIER.RigidBody[]): [CoinFace, CoinFace, CoinFace] {
+  return bodies.map((body) =>
+    coinFaceFromPhysicsRotation(quaternionFromRapier(body.rotation()))
+  ) as [CoinFace, CoinFace, CoinFace];
 }
 
 function coinColliderVerticalExtent(rotation: THREE.Quaternion): number {
@@ -439,23 +451,27 @@ function createPhysicalCoinPhysicsSimulation(input: PhysicalTossInput): CoinPhys
 
     const rotations = bodies.map((body) => quaternionFromRapier(body.rotation()));
     const hasStrictFace = rotations.every(isSettledFaceRotation);
+    const hasReadableFace = rotations.every(isReadableFaceRotation);
     const moving = bodies.some((body) => {
       const linear = body.linvel();
       const angular = body.angvel();
+      const linearSpeed = Math.hypot(linear.x, linear.y, linear.z);
+      const angularSpeed = Math.hypot(angular.x, angular.y, angular.z);
 
-      return (
-        Math.hypot(linear.x, linear.y, linear.z) > LINEAR_SLEEP_SPEED ||
-        Math.hypot(angular.x, angular.y, angular.z) > ANGULAR_SLEEP_SPEED
-      );
+      return linearSpeed > LINEAR_SLEEP_SPEED || angularSpeed > ANGULAR_SLEEP_SPEED;
     });
 
-    if (!hasStrictFace || (moving && elapsed < FORCE_SETTLE_AFTER_SECONDS)) {
-      return null;
+    if (hasStrictFace && (!moving || elapsed >= FORCE_SETTLE_AFTER_SECONDS)) {
+      settledReason = 'strict';
+      return readFacesFromBodies(bodies);
     }
 
-    settledReason = moving ? 'timeout-readable' : 'strict';
+    if (elapsed >= READABLE_AFTER_SECONDS && hasReadableFace) {
+      settledReason = 'timeout-readable';
+      return readFacesFromBodies(bodies);
+    }
 
-    return rotations.map(coinFaceFromPhysicsRotation) as [CoinFace, CoinFace, CoinFace];
+    return null;
   };
 
   return {
