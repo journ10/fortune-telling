@@ -1,8 +1,12 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import * as THREE from 'three';
 import { afterEach, beforeEach, vi } from 'vitest';
 import type { CoinFace } from '../domain/types';
+import {
+  createKeyboardPhysicalTossInput,
+  type PhysicalTossInput
+} from '../physics/physicalTossInput';
 import TabletopScene, {
   COIN_TEXTURE_ASSET,
   MIN_COIN_LANDING_DISTANCE,
@@ -13,38 +17,54 @@ import TabletopScene, {
   createCoinGroup
 } from './TabletopScene';
 
+vi.mock('../hooks/usePhysicalTossSimulation', () => ({
+  usePhysicalTossSimulation: vi.fn(() => null)
+}));
+
+interface PendingPhysicalToss {
+  id: number;
+  input: PhysicalTossInput;
+}
+
 interface RenderTabletopSceneOptions {
   currentThrow?: number;
-  pendingTossId?: number | null;
+  pendingToss?: PendingPhysicalToss | null;
   resultAvailable?: boolean;
-  tossInteractionPhase?: 'idle' | 'shaking' | 'released';
   onOpenResult?: () => void;
-  onTossRequest?: () => void;
+  onPhysicalTossRequest?: (input: PhysicalTossInput) => void;
   onTossSettled?: (faces: [CoinFace, CoinFace, CoinFace]) => void;
+}
+
+function createPendingToss(id: number, currentThrow = 1): PendingPhysicalToss {
+  return {
+    id,
+    input: createKeyboardPhysicalTossInput({
+      currentThrow,
+      perturbationSeed: id
+    })
+  };
 }
 
 function renderTabletopScene({
   currentThrow = 1,
-  pendingTossId = null,
+  pendingToss = null,
   resultAvailable = false,
-  tossInteractionPhase = 'idle',
   onOpenResult = vi.fn(),
-  onTossRequest = vi.fn(),
+  onPhysicalTossRequest = vi.fn(),
   onTossSettled = vi.fn()
 }: RenderTabletopSceneOptions = {}) {
   render(
     <TabletopScene
       currentThrow={currentThrow}
-      pendingTossId={pendingTossId}
+      pendingToss={pendingToss}
       resultAvailable={resultAvailable}
-      tossInteractionPhase={tossInteractionPhase}
       onOpenResult={onOpenResult}
-      onTossRequest={onTossRequest}
+      onPhysicalTossRequest={onPhysicalTossRequest}
       onTossSettled={onTossSettled}
     />
   );
 
-  return { onOpenResult, onTossRequest, onTossSettled };
+  return { onOpenResult, onPhysicalTossRequest, onTossSettled };
 }
 
 beforeEach(() => {
@@ -240,86 +260,84 @@ describe('TabletopScene', () => {
   });
 
   it('renders the coin interaction without question or AI copy', () => {
-    const onTossRequest = vi.fn();
+    const onPhysicalTossRequest = vi.fn();
 
-    renderTabletopScene({ onTossRequest });
+    renderTabletopScene({ onPhysicalTossRequest });
 
-    fireEvent.pointerDown(screen.getByRole('button', { name: '按住颠钱，松开掷出' }));
+    const button = screen.getByRole('button', { name: '拖动铜钱，松手掷出' });
+    fireEvent.pointerDown(button, { clientX: 210, clientY: 250 });
+    fireEvent.pointerUp(button, { clientX: 260, clientY: 220 });
 
-    expect(onTossRequest).toHaveBeenCalledTimes(1);
+    expect(onPhysicalTossRequest).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('开始起卦')).not.toBeInTheDocument();
     expect(screen.queryByText('AI 解读')).not.toBeInTheDocument();
   });
 
-  it('settles a pending toss with fallback faces in the non-WebGL fallback', async () => {
-    vi.useFakeTimers();
-    const onTossSettled = vi.fn();
+  it('requests a physical pointer toss from drag release samples', () => {
+    const onPhysicalTossRequest = vi.fn();
 
-    renderTabletopScene({
-      pendingTossId: 1,
-      tossInteractionPhase: 'released',
-      onTossSettled
+    renderTabletopScene({ onPhysicalTossRequest });
+
+    const button = screen.getByRole('button', { name: '拖动铜钱，松手掷出' });
+    fireEvent.pointerDown(button, { clientX: 210, clientY: 250 });
+    fireEvent.pointerMove(button, { clientX: 260, clientY: 220 });
+    fireEvent.pointerMove(button, { clientX: 340, clientY: 180 });
+    fireEvent.pointerUp(button, { clientX: 390, clientY: 160 });
+
+    expect(onPhysicalTossRequest).toHaveBeenCalledTimes(1);
+    expect(onPhysicalTossRequest.mock.calls[0][0]).toMatchObject({
+      source: 'pointer',
+      currentThrow: 1
     });
+    expect(onPhysicalTossRequest.mock.calls[0][0].coins).toHaveLength(3);
+  });
 
-    await act(async () => {
-      await vi.runOnlyPendingTimersAsync();
-    });
+  it('creates a keyboard physical toss on Enter release', () => {
+    const onPhysicalTossRequest = vi.fn();
 
-    expect(onTossSettled).toHaveBeenCalledTimes(1);
-    expect(onTossSettled.mock.calls[0][0]).toHaveLength(3);
-    onTossSettled.mock.calls[0][0].forEach((face: CoinFace) => {
-      expect(['heads', 'tails']).toContain(face);
+    renderTabletopScene({ onPhysicalTossRequest });
+
+    const button = screen.getByRole('button', { name: '拖动铜钱，松手掷出' });
+    fireEvent.keyDown(button, { key: 'Enter' });
+    fireEvent.keyUp(button, { key: 'Enter' });
+
+    expect(onPhysicalTossRequest).toHaveBeenCalledTimes(1);
+    expect(onPhysicalTossRequest.mock.calls[0][0]).toMatchObject({
+      source: 'keyboard',
+      currentThrow: 1
     });
   });
 
-  it('keeps settled fallback coins on the tabletop until the next manual toss', async () => {
-    vi.useFakeTimers();
+  it('does not settle a pending toss from fallback display faces', () => {
     const onTossSettled = vi.fn();
-    const { rerender } = render(
-      <TabletopScene
-        currentThrow={1}
-        pendingTossId={1}
-        resultAvailable={false}
-        tossInteractionPhase="released"
-        onOpenResult={vi.fn()}
-        onTossRequest={vi.fn()}
-        onTossSettled={onTossSettled}
-      />
-    );
+
+    renderTabletopScene({
+      pendingToss: createPendingToss(1),
+      onTossSettled
+    });
+
+    expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
+    expect(document.querySelectorAll('.fallbackCoin')).toHaveLength(3);
+    expect(onTossSettled).not.toHaveBeenCalled();
+  });
+
+  it('keeps neutral fallback coins on the tabletop while physics is pending', () => {
+    const onTossSettled = vi.fn();
+
+    renderTabletopScene({
+      pendingToss: createPendingToss(1),
+      onTossSettled
+    });
 
     const pendingFaces = Array.from(document.querySelectorAll('.fallbackCoin')).map((coin) =>
       coin.getAttribute('data-face')
     );
-    expect(pendingFaces).toHaveLength(3);
-    pendingFaces.forEach((face) => {
-      expect(['heads', 'tails']).toContain(face);
-    });
 
-    await act(async () => {
-      await vi.runOnlyPendingTimersAsync();
-    });
-
-    expect(onTossSettled).toHaveBeenCalledTimes(1);
-
-    rerender(
-      <TabletopScene
-        currentThrow={2}
-        pendingTossId={null}
-        resultAvailable={false}
-        onOpenResult={vi.fn()}
-        onTossRequest={vi.fn()}
-        onTossSettled={onTossSettled}
-      />
-    );
-
-    const settledFaces = Array.from(document.querySelectorAll('.fallbackCoin')).map((coin) =>
-      coin.getAttribute('data-face')
-    );
-    expect(settledFaces).toEqual(pendingFaces);
+    expect(pendingFaces).toEqual(['heads', 'tails', 'heads']);
+    expect(onTossSettled).not.toHaveBeenCalled();
   });
 
-  it('keeps fallback coins and settles a toss when WebGL renderer setup fails', async () => {
-    vi.useFakeTimers();
+  it('keeps fallback coins without settling when WebGL renderer setup fails', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       {} as CanvasRenderingContext2D
     );
@@ -327,94 +345,56 @@ describe('TabletopScene', () => {
 
     expect(() =>
       renderTabletopScene({
-        pendingTossId: 2,
-        tossInteractionPhase: 'released',
+        pendingToss: createPendingToss(2),
         onTossSettled
       })
     ).not.toThrow();
 
     expect(document.querySelector('.tabletopCanvas canvas')).not.toBeInTheDocument();
     expect(document.querySelectorAll('.fallbackCoin')).toHaveLength(3);
-
-    await act(async () => {
-      await vi.runOnlyPendingTimersAsync();
-    });
-
-    expect(onTossSettled).toHaveBeenCalledTimes(1);
-    expect(onTossSettled.mock.calls[0][0]).toHaveLength(3);
+    expect(onTossSettled).not.toHaveBeenCalled();
   });
 
-  it('settles a rerendered pending toss once without restarting the timer', async () => {
-    vi.useFakeTimers();
+  it('does not settle a rerendered pending toss without physics faces', () => {
     const firstSettled = vi.fn();
     const secondSettled = vi.fn();
-    const thirdSettled = vi.fn();
 
     const { rerender } = render(
       <TabletopScene
         currentThrow={2}
-        pendingTossId={22}
+        pendingToss={createPendingToss(22, 2)}
         resultAvailable={false}
-        tossInteractionPhase="released"
         onOpenResult={vi.fn()}
-        onTossRequest={vi.fn()}
+        onPhysicalTossRequest={vi.fn()}
         onTossSettled={firstSettled}
       />
     );
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1700);
-    });
-
     rerender(
       <TabletopScene
         currentThrow={2}
-        pendingTossId={22}
+        pendingToss={createPendingToss(22, 2)}
         resultAvailable={false}
-        tossInteractionPhase="released"
         onOpenResult={vi.fn()}
-        onTossRequest={vi.fn()}
+        onPhysicalTossRequest={vi.fn()}
         onTossSettled={secondSettled}
       />
     );
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(520);
-    });
-
     expect(firstSettled).not.toHaveBeenCalled();
-    expect(secondSettled).toHaveBeenCalledTimes(1);
-
-    rerender(
-      <TabletopScene
-        currentThrow={2}
-        pendingTossId={22}
-        resultAvailable={false}
-        tossInteractionPhase="released"
-        onOpenResult={vi.fn()}
-        onTossRequest={vi.fn()}
-        onTossSettled={thirdSettled}
-      />
-    );
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000);
-    });
-
-    expect(secondSettled).toHaveBeenCalledTimes(1);
-    expect(thirdSettled).not.toHaveBeenCalled();
+    expect(secondSettled).not.toHaveBeenCalled();
   });
 
   it('opens the result when a result is available', async () => {
     const user = userEvent.setup();
     const onOpenResult = vi.fn();
-    const onTossRequest = vi.fn();
+    const onPhysicalTossRequest = vi.fn();
 
-    renderTabletopScene({ resultAvailable: true, onOpenResult, onTossRequest });
+    renderTabletopScene({ resultAvailable: true, onOpenResult, onPhysicalTossRequest });
 
     await user.click(screen.getByRole('button', { name: '查看结果' }));
 
     expect(onOpenResult).toHaveBeenCalledTimes(1);
-    expect(onTossRequest).not.toHaveBeenCalled();
+    expect(onPhysicalTossRequest).not.toHaveBeenCalled();
   });
 });

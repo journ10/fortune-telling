@@ -12,23 +12,20 @@ afterEach(() => {
 
 describe('TabletopScene gesture trigger', () => {
   it('keeps the coin interaction surface keyboard-triggerable as the native toss button', () => {
-    const onTossRelease = vi.fn();
-    const onTossShakeStart = vi.fn();
+    const onPhysicalTossRequest = vi.fn();
 
     render(
       <TabletopScene
         currentThrow={1}
-        pendingTossId={null}
+        pendingToss={null}
         resultAvailable={false}
         onOpenResult={vi.fn()}
-        onTossRelease={onTossRelease}
-        onTossRequest={vi.fn()}
-        onTossShakeStart={onTossShakeStart}
+        onPhysicalTossRequest={onPhysicalTossRequest}
         onTossSettled={vi.fn()}
       />
     );
 
-    const tossButton = screen.getByRole('button', { name: '按住颠钱，松开掷出' });
+    const tossButton = screen.getByRole('button', { name: '拖动铜钱，松手掷出' });
 
     tossButton.focus();
     expect(tossButton).toHaveFocus();
@@ -36,7 +33,10 @@ describe('TabletopScene gesture trigger', () => {
     fireEvent.keyDown(tossButton, { key: 'Enter' });
     fireEvent.keyUp(tossButton, { key: 'Enter' });
 
-    expect(onTossShakeStart).toHaveBeenCalledTimes(1);
-    expect(onTossRelease).toHaveBeenCalledTimes(1);
+    expect(onPhysicalTossRequest).toHaveBeenCalledTimes(1);
+    expect(onPhysicalTossRequest.mock.calls[0][0]).toMatchObject({
+      currentThrow: 1,
+      source: 'keyboard'
+    });
   });
 });

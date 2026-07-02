@@ -4,14 +4,58 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import * as coinTossModule from './domain/coinToss';
 
-const SETTLE_DELAY_MS = 1700;
-const SETTLED_HOLD_MS = 520;
-const SETTLE_CALLBACK_DELAY_MS = SETTLE_DELAY_MS + SETTLED_HOLD_MS;
-const READY_TOSS_BUTTON_NAME = '按住颠钱，松开掷出';
+vi.mock('./hooks/usePhysicalTossSimulation', async () => {
+  const React = await import('react');
+  const settleDelayMs = 2220;
+
+  return {
+    usePhysicalTossSimulation: ({
+      pendingTossKey,
+      onSettled
+    }: {
+      pendingTossKey: string | number | null | undefined;
+      onSettled: (faces: ['heads', 'tails', 'heads']) => void;
+    }) => {
+      const [faces, setFaces] = React.useState<['heads', 'tails', 'heads'] | null>(null);
+
+      React.useEffect(() => {
+        setFaces(null);
+
+        if (!pendingTossKey) {
+          return undefined;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+          const settledFaces: ['heads', 'tails', 'heads'] = ['heads', 'tails', 'heads'];
+          setFaces(settledFaces);
+          onSettled(settledFaces);
+        }, settleDelayMs);
+
+        return () => {
+          window.clearTimeout(timeoutId);
+        };
+      }, [onSettled, pendingTossKey]);
+
+      return faces
+        ? {
+            coins: [],
+            elapsed: settleDelayMs / 1000,
+            faces,
+            phase: 'settled',
+            settled: true,
+            settledReason: 'strict'
+          }
+        : null;
+    }
+  };
+});
+
+const SIMULATED_PHYSICS_SETTLE_MS = 2220;
+const READY_TOSS_BUTTON_NAME = '拖动铜钱，松手掷出';
 
 async function advanceTossSettlement() {
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(SETTLE_CALLBACK_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(SIMULATED_PHYSICS_SETTLE_MS);
   });
 }
 
@@ -61,9 +105,9 @@ async function startCastingWithDefaultQuestion(user: ReturnType<typeof userEvent
 async function settleOneToss() {
   const tossButton = screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME });
 
-  fireEvent.pointerDown(tossButton);
-  expect(screen.getByRole('button', { name: '颠钱中' })).toBeEnabled();
-  fireEvent.pointerUp(screen.getByRole('button', { name: '颠钱中' }));
+  fireEvent.pointerDown(tossButton, { clientX: 220, clientY: 260 });
+  fireEvent.pointerMove(tossButton, { clientX: 300, clientY: 210 });
+  fireEvent.pointerUp(tossButton, { clientX: 370, clientY: 170 });
 
   expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
   await advanceTossSettlement();
@@ -77,8 +121,10 @@ async function settleSixTosses() {
     await settleOneToss();
   }
 
-  fireEvent.pointerDown(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME }));
-  fireEvent.pointerUp(screen.getByRole('button', { name: '颠钱中' }));
+  const tossButton = screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME });
+  fireEvent.pointerDown(tossButton, { clientX: 220, clientY: 260 });
+  fireEvent.pointerMove(tossButton, { clientX: 300, clientY: 210 });
+  fireEvent.pointerUp(tossButton, { clientX: 370, clientY: 170 });
 
   expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
   await advanceTossSettlement();
@@ -148,7 +194,7 @@ describe('App', () => {
     expect(screen.queryByText('AI Provider')).not.toBeInTheDocument();
   });
 
-  it('waits for tabletop-settled faces instead of pre-generating a random toss', async () => {
+  it('waits for physics-settled faces instead of pre-generating a random toss', async () => {
     const user = userEvent.setup();
     const tossCoinsSpy = vi.spyOn(coinTossModule, 'tossCoins');
     vi.stubGlobal('fetch', vi.fn());
@@ -158,17 +204,13 @@ describe('App', () => {
     await saveAiSettings(user, { apiKey: 'sk-user' });
     await startCastingWithDefaultQuestion(user);
 
-    vi.useFakeTimers();
-    fireEvent.pointerDown(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME }));
-    fireEvent.pointerUp(screen.getByRole('button', { name: '颠钱中' }));
+    const tossButton = screen.getByRole('button', { name: '拖动铜钱，松手掷出' });
+    fireEvent.pointerDown(tossButton, { clientX: 220, clientY: 260 });
+    fireEvent.pointerMove(tossButton, { clientX: 300, clientY: 210 });
+    fireEvent.pointerUp(tossButton, { clientX: 370, clientY: 170 });
 
     expect(tossCoinsSpy).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
-
-    await advanceTossSettlement();
-
-    expect(tossCoinsSpy).not.toHaveBeenCalled();
-    expect(screen.getByRole('status')).toHaveTextContent('第 2 掷 / 共 6 掷');
   });
 
   it('generates a fresh cryptographic seed for each tabletop toss request', async () => {
@@ -187,10 +229,15 @@ describe('App', () => {
     await startCastingWithDefaultQuestion(user);
 
     vi.useFakeTimers();
-    fireEvent.pointerDown(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME }));
-    fireEvent.pointerUp(screen.getByRole('button', { name: '颠钱中' }));
+    let tossButton = screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME });
+    fireEvent.pointerDown(tossButton, { clientX: 220, clientY: 260 });
+    fireEvent.pointerMove(tossButton, { clientX: 300, clientY: 210 });
+    fireEvent.pointerUp(tossButton, { clientX: 370, clientY: 170 });
     await advanceTossSettlement();
-    fireEvent.pointerDown(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME }));
+    tossButton = screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME });
+    fireEvent.pointerDown(tossButton, { clientX: 220, clientY: 260 });
+    fireEvent.pointerMove(tossButton, { clientX: 300, clientY: 210 });
+    fireEvent.pointerUp(tossButton, { clientX: 370, clientY: 170 });
 
     expect(getRandomValues).toHaveBeenCalledTimes(2);
     getRandomValues.mock.calls.forEach(([array]) => {

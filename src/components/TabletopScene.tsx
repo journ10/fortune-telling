@@ -3,36 +3,36 @@ import type { CSSProperties } from 'react';
 import * as THREE from 'three';
 import coinTextureUrl from '../assets/qing-cash-coin-texture.png';
 import type { CoinFace } from '../domain/types';
-import {
-  createCoinPhysicsSimulation,
-  initCoinPhysics,
-  type CoinPhysicsSimulation,
-  type CoinPhysicsSnapshot,
-  type TossDriveState
-} from '../physics/coinPhysics';
+import { usePhysicalTossSimulation } from '../hooks/usePhysicalTossSimulation';
+import type { CoinPhysicsSnapshot } from '../physics/coinPhysics';
 import {
   TABLETOP_COIN_RADIUS,
   TABLETOP_COIN_THICKNESS
 } from '../physics/coinGeometry';
+import {
+  createKeyboardPhysicalTossInput,
+  createPointerPhysicalTossInput,
+  type PhysicalTossInput,
+  type PointerTossSample
+} from '../physics/physicalTossInput';
+
+interface PendingPhysicalToss {
+  id: number;
+  input: PhysicalTossInput;
+}
 
 interface TabletopSceneProps {
   currentThrow: number;
-  pendingTossId: number | null;
-  pendingTossSeed?: number | null;
+  pendingToss: PendingPhysicalToss | null;
   resultAvailable: boolean;
   tossDriveEnergy?: number | null;
-  tossInteractionPhase?: 'idle' | 'shaking' | 'released';
   onOpenResult: () => void;
-  onTossRelease?: () => void;
-  onTossRequest: () => void;
-  onTossShakeStart?: () => void;
+  onPhysicalTossRequest: (input: PhysicalTossInput) => void;
   onTossSettled: (faces: [CoinFace, CoinFace, CoinFace]) => void;
 }
 
 const FALLBACK_FACES: [CoinFace, CoinFace, CoinFace] = ['heads', 'tails', 'heads'];
 const SETTLE_DELAY_MS = 1700;
-const SETTLED_HOLD_MS = 520;
-const SETTLE_CALLBACK_DELAY_MS = SETTLE_DELAY_MS + SETTLED_HOLD_MS;
 const SCENE_WIDTH = 720;
 const SCENE_HEIGHT = 480;
 export { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS };
@@ -249,53 +249,6 @@ export function computeCoinTableContactY(rotation: THREE.Euler, tableY = 0): num
   return tableY + radialVerticalExtent + surfaceVerticalExtent + TABLETOP_CONTACT_CLEARANCE;
 }
 
-function createPendingTossKey(
-  currentThrow: number,
-  pendingTossId: number | null,
-  pendingTossSeed: number
-): string | null {
-  if (pendingTossId === null) {
-    return null;
-  }
-
-  return `${currentThrow}:${pendingTossId}:${pendingTossSeed >>> 0}`;
-}
-
-function createFallbackTossFaces(
-  currentThrow: number,
-  pendingTossId: number,
-  pendingTossSeed = 0
-): [CoinFace, CoinFace, CoinFace] {
-  const random = createSeededRandom(
-    Math.imul(currentThrow + 13, 1597334677) ^
-      Math.imul(pendingTossId + 41, 3812015801) ^
-      Math.imul((pendingTossSeed >>> 0) + 23, 3266489917)
-  );
-
-  return [0, 1, 2].map(() => (random() > 0.5 ? 'heads' : 'tails')) as [
-    CoinFace,
-    CoinFace,
-    CoinFace
-  ];
-}
-
-function createFallbackSettledTransforms(
-  plans: readonly CoinAnimationPlan[]
-): SettledCoinTransform[] {
-  return plans.map((plan) => {
-    const rotation = new THREE.Euler(plan.finalRotationX, 0, plan.finalRotationZ);
-
-    return {
-      position: new THREE.Vector3(
-        plan.landingX + plan.slideX,
-        computeCoinTableContactY(rotation),
-        plan.landingZ + plan.slideZ
-      ),
-      rotation: new THREE.Quaternion().setFromEuler(rotation)
-    };
-  });
-}
-
 function createPhysicsSettledTransforms(snapshot: CoinPhysicsSnapshot): SettledCoinTransform[] {
   return snapshot.coins.map((coin) => ({
     position: coin.position.clone(),
@@ -312,17 +265,6 @@ function createRestingCoinTransforms(): SettledCoinTransform[] {
       rotation: new THREE.Quaternion().setFromEuler(rotation)
     };
   });
-}
-
-function resolveTossDriveEnergy(
-  phase: 'idle' | 'shaking' | 'released',
-  motionEnergy: number | null | undefined
-): number {
-  if (typeof motionEnergy === 'number') {
-    return clamp(0.38 + motionEnergy * 0.54, 0.38, 1);
-  }
-
-  return phase === 'shaking' ? 0.86 : 0.58;
 }
 
 function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
@@ -953,62 +895,54 @@ export function createCoinGroup(variant: number, coinTexture?: THREE.Texture): T
 
 export default function TabletopScene({
   currentThrow,
-  pendingTossId,
-  pendingTossSeed = null,
+  pendingToss,
   resultAvailable,
-  tossDriveEnergy = null,
-  tossInteractionPhase = 'idle',
   onOpenResult,
-  onTossRequest,
-  onTossRelease = onTossRequest,
-  onTossShakeStart = onTossRequest,
+  onPhysicalTossRequest,
   onTossSettled
 }: TabletopSceneProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
-  const coinTargetsRef = useRef<number[]>(FALLBACK_FACES.map(targetRotationForFace));
   const coinPlansRef = useRef<CoinAnimationPlan[]>(
     createCoinAnimationPlans(0, FALLBACK_FACES)
   );
-  const currentThrowRef = useRef(currentThrow);
   const tossStartedAtRef = useRef<number | null>(null);
-  const physicsSimulationRef = useRef<CoinPhysicsSimulation | null>(null);
-  const physicsTossKeyRef = useRef<string | null>(null);
+  const physicsSnapshotRef = useRef<CoinPhysicsSnapshot | null>(null);
   const settledVisualStateRef = useRef<SettledTossVisualState | null>(null);
-  const settlingHoldTimeoutRef = useRef<number | null>(null);
-  const settledTossKeyRef = useRef<string | null>(null);
-  const scheduledTossKeyRef = useRef<string | null>(null);
-  const releasedTossKeyRef = useRef<string | null>(null);
-  const tossDriveEnergyRef = useRef(tossDriveEnergy);
-  const tossInteractionPhaseRef = useRef(tossInteractionPhase);
-  const onTossSettledRef = useRef(onTossSettled);
+  const settledPhysicsFacesKeyRef = useRef<string | null>(null);
+  const pointerSamplesRef = useRef<PointerTossSample[]>([]);
   const pointerHoldingRef = useRef(false);
   const [isWebGlActive, setIsWebGlActive] = useState(false);
   const [settledFallbackFaces, setSettledFallbackFaces] = useState<
     [CoinFace, CoinFace, CoinFace] | null
   >(null);
   const throwStatusId = useId();
-  const activePendingTossSeed = pendingTossSeed ?? 0;
-  const pendingTossKey = createPendingTossKey(
-    currentThrow,
-    pendingTossId,
-    activePendingTossSeed
-  );
+  const pendingTossKey = pendingToss ? `${currentThrow}:${pendingToss.id}` : null;
+  const physicsSnapshot = usePhysicalTossSimulation({
+    pendingTossKey,
+    input: pendingToss?.input ?? null,
+    onSettled: onTossSettled
+  });
 
   useEffect(() => {
-    onTossSettledRef.current = onTossSettled;
-  }, [onTossSettled]);
+    physicsSnapshotRef.current = physicsSnapshot;
 
-  useEffect(() => {
-    currentThrowRef.current = currentThrow;
-  }, [currentThrow]);
+    if (!physicsSnapshot?.faces) {
+      return;
+    }
 
-  useEffect(() => {
-    tossInteractionPhaseRef.current = tossInteractionPhase;
-  }, [tossInteractionPhase]);
+    const facesKey = `${pendingTossKey ?? 'settled'}:${physicsSnapshot.faces.join(',')}`;
 
-  useEffect(() => {
-    tossDriveEnergyRef.current = tossDriveEnergy;
-  }, [tossDriveEnergy]);
+    if (settledPhysicsFacesKeyRef.current === facesKey) {
+      return;
+    }
+
+    settledPhysicsFacesKeyRef.current = facesKey;
+    settledVisualStateRef.current = {
+      transforms: createPhysicsSettledTransforms(physicsSnapshot)
+    };
+    setSettledFallbackFaces(physicsSnapshot.faces);
+    coinPlansRef.current = createCoinAnimationPlans(currentThrow, physicsSnapshot.faces);
+  }, [currentThrow, pendingTossKey, physicsSnapshot]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -1027,16 +961,10 @@ export default function TabletopScene({
     let isWindowResizeFallback = false;
     let animationFrame = 0;
     let isEffectActive = true;
-    let isPhysicsReady = false;
 
     const cleanupWebGlResources = () => {
       if (animationFrame) {
         window.cancelAnimationFrame(animationFrame);
-      }
-
-      if (settlingHoldTimeoutRef.current !== null) {
-        window.clearTimeout(settlingHoldTimeoutRef.current);
-        settlingHoldTimeoutRef.current = null;
       }
 
       isEffectActive = false;
@@ -1059,23 +987,10 @@ export default function TabletopScene({
         disposeMaterial(tabletopMaterial);
       }
 
-      physicsSimulationRef.current?.dispose();
-      physicsSimulationRef.current = null;
-      physicsTossKeyRef.current = null;
       renderer?.dispose();
     };
 
     try {
-      initCoinPhysics()
-        .then(() => {
-          if (isEffectActive) {
-            isPhysicsReady = true;
-          }
-        })
-        .catch(() => {
-          isPhysicsReady = false;
-        });
-
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x121611);
       const camera = new THREE.PerspectiveCamera(35, SCENE_WIDTH / SCENE_HEIGHT, 0.1, 100);
@@ -1197,88 +1112,11 @@ export default function TabletopScene({
 
       const clock = new THREE.Clock();
       const renderFrame = () => {
-        const deltaSeconds = clock.getDelta();
-        const elapsed = clock.elapsedTime;
+        clock.getDelta();
         const tossStartedAt = tossStartedAtRef.current;
         const tossProgress =
           tossStartedAt === null ? null : clamp((getTime() - tossStartedAt) / SETTLE_DELAY_MS);
-        const activeTossKey = scheduledTossKeyRef.current;
-        let physicsSnapshot: CoinPhysicsSnapshot | null = null;
-
-        if (tossProgress !== null && activeTossKey && isPhysicsReady) {
-          if (physicsTossKeyRef.current !== activeTossKey) {
-            const [, requestIdPart, tossSeedPart] = activeTossKey.split(':');
-            physicsSimulationRef.current?.dispose();
-            physicsSimulationRef.current = createCoinPhysicsSimulation(
-              currentThrowRef.current,
-              Number(requestIdPart ?? 0),
-              Number(tossSeedPart ?? 0),
-              {
-                mode: 'chamber',
-                drive: {
-                  elapsedSeconds: 0,
-                  energy: resolveTossDriveEnergy(
-                    tossInteractionPhaseRef.current,
-                    tossDriveEnergyRef.current
-                  ),
-                  release: false
-                }
-              }
-            );
-            physicsTossKeyRef.current = activeTossKey;
-          }
-
-          const drive: TossDriveState = {
-            elapsedSeconds: tossStartedAt === null ? 0 : (getTime() - tossStartedAt) / 1000,
-            energy: resolveTossDriveEnergy(
-              tossInteractionPhaseRef.current,
-              tossDriveEnergyRef.current
-            ),
-            release: tossInteractionPhaseRef.current === 'released'
-          };
-
-          if (tossInteractionPhaseRef.current === 'shaking') {
-            physicsSimulationRef.current?.updateChamberDrive?.(drive);
-          } else if (
-            tossInteractionPhaseRef.current === 'released' &&
-            releasedTossKeyRef.current !== activeTossKey
-          ) {
-            releasedTossKeyRef.current = activeTossKey;
-            physicsSimulationRef.current?.releaseChamber?.(drive);
-          }
-
-          physicsSnapshot = physicsSimulationRef.current?.step(deltaSeconds) ?? null;
-
-          if (
-            physicsSnapshot?.settled &&
-            physicsSnapshot.faces &&
-            settledTossKeyRef.current !== activeTossKey &&
-            settlingHoldTimeoutRef.current === null
-          ) {
-            const settledFaces = physicsSnapshot.faces;
-            settledTossKeyRef.current = activeTossKey;
-            coinTargetsRef.current = settledFaces.map(targetRotationForFace);
-            settledVisualStateRef.current = {
-              transforms: createPhysicsSettledTransforms(physicsSnapshot)
-            };
-            setSettledFallbackFaces(settledFaces);
-
-            settlingHoldTimeoutRef.current = window.setTimeout(() => {
-              settlingHoldTimeoutRef.current = null;
-
-              if (scheduledTossKeyRef.current !== activeTossKey) {
-                return;
-              }
-
-              tossStartedAtRef.current = null;
-              scheduledTossKeyRef.current = null;
-              physicsSimulationRef.current?.dispose();
-              physicsSimulationRef.current = null;
-              physicsTossKeyRef.current = null;
-              onTossSettledRef.current(settledFaces);
-            }, SETTLED_HOLD_MS);
-          }
-        }
+        const physicsSnapshot = physicsSnapshotRef.current;
 
         coinGroups.forEach((coin, index) => {
           const plan = coinPlansRef.current[index];
@@ -1357,126 +1195,81 @@ export default function TabletopScene({
   }, []);
 
   useEffect(() => {
-    if (!pendingTossKey || pendingTossId === null) {
+    if (!pendingTossKey) {
       if (currentThrow === 1 && !resultAvailable) {
         settledVisualStateRef.current = null;
         setSettledFallbackFaces(null);
+        settledPhysicsFacesKeyRef.current = null;
       }
 
       tossStartedAtRef.current = null;
-      scheduledTossKeyRef.current = null;
-      settledTossKeyRef.current = null;
-      releasedTossKeyRef.current = null;
-      physicsSimulationRef.current?.dispose();
-      physicsSimulationRef.current = null;
-      physicsTossKeyRef.current = null;
-      if (settlingHoldTimeoutRef.current !== null) {
-        window.clearTimeout(settlingHoldTimeoutRef.current);
-        settlingHoldTimeoutRef.current = null;
-      }
 
       if (!settledVisualStateRef.current) {
-        coinTargetsRef.current = FALLBACK_FACES.map(targetRotationForFace);
         coinPlansRef.current = createCoinAnimationPlans(currentThrow, FALLBACK_FACES);
       }
 
-      return undefined;
-    }
-
-    if (
-      scheduledTossKeyRef.current === pendingTossKey ||
-      settledTossKeyRef.current === pendingTossKey
-    ) {
-      return undefined;
+      return;
     }
 
     settledVisualStateRef.current = null;
     setSettledFallbackFaces(null);
-    scheduledTossKeyRef.current = pendingTossKey;
-    releasedTossKeyRef.current = null;
+    settledPhysicsFacesKeyRef.current = null;
     tossStartedAtRef.current = getTime();
-    const fallbackFaces = createFallbackTossFaces(
-      currentThrow,
-      pendingTossId,
-      activePendingTossSeed
-    );
-    coinTargetsRef.current = fallbackFaces.map(targetRotationForFace);
-    coinPlansRef.current = createCoinAnimationPlans(currentThrow, fallbackFaces);
+    coinPlansRef.current = createCoinAnimationPlans(currentThrow, FALLBACK_FACES);
+  }, [currentThrow, pendingTossKey, resultAvailable]);
 
-    return undefined;
-  }, [activePendingTossSeed, currentThrow, pendingTossId, pendingTossKey, resultAvailable]);
+  function readPointerSample(event: React.PointerEvent<HTMLButtonElement>): PointerTossSample {
+    const rect = event.currentTarget.getBoundingClientRect();
 
-  useEffect(() => {
-    if (!pendingTossKey || pendingTossId === null || tossInteractionPhase !== 'released') {
-      return undefined;
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      timestamp: getTime()
+    };
+  }
+
+  function createPerturbationSeed(seedMix: number): number {
+    const values = new Uint32Array(1);
+
+    if (globalThis.crypto?.getRandomValues) {
+      globalThis.crypto.getRandomValues(values);
+      return (values[0] ^ seedMix) >>> 0;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      if (
-        scheduledTossKeyRef.current !== pendingTossKey ||
-        settledTossKeyRef.current === pendingTossKey
-      ) {
-        return;
-      }
+    return (Date.now() ^ seedMix) >>> 0;
+  }
 
-      if (physicsSimulationRef.current !== null) {
-        return;
-      }
+  const requestPointerToss = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const samples = [...pointerSamplesRef.current, readPointerSample(event)].slice(-8);
+    pointerSamplesRef.current = [];
+    pointerHoldingRef.current = false;
 
-      tossStartedAtRef.current = null;
-      scheduledTossKeyRef.current = null;
-      settledTossKeyRef.current = pendingTossKey;
-      physicsSimulationRef.current = null;
-      physicsTossKeyRef.current = null;
-      settledVisualStateRef.current = {
-        transforms: createFallbackSettledTransforms(coinPlansRef.current)
-      };
-      setSettledFallbackFaces(fallbackFaces);
-      onTossSettledRef.current(fallbackFaces);
-    }, SETTLE_CALLBACK_DELAY_MS);
+    onPhysicalTossRequest(
+      createPointerPhysicalTossInput({
+        currentThrow,
+        samples,
+        sceneWidth: event.currentTarget.clientWidth || SCENE_WIDTH,
+        sceneHeight: event.currentTarget.clientHeight || SCENE_HEIGHT,
+        perturbationSeed: createPerturbationSeed(samples.length)
+      })
+    );
+  };
 
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [
-    activePendingTossSeed,
-    currentThrow,
-    pendingTossId,
-    pendingTossKey,
-    tossInteractionPhase
-  ]);
+  const requestKeyboardToss = () => {
+    onPhysicalTossRequest(
+      createKeyboardPhysicalTossInput({
+        currentThrow,
+        perturbationSeed: createPerturbationSeed(currentThrow)
+      })
+    );
+  };
 
-  const fallbackFaces =
-    pendingTossId === null
-      ? settledFallbackFaces ?? FALLBACK_FACES
-      : createFallbackTossFaces(currentThrow, pendingTossId, activePendingTossSeed);
+  const fallbackFaces = physicsSnapshot?.faces ?? settledFallbackFaces ?? FALLBACK_FACES;
   const buttonLabel = resultAvailable
     ? '查看结果'
-    : tossInteractionPhase === 'released'
+    : pendingToss
       ? '投掷落定中'
-      : tossInteractionPhase === 'shaking'
-        ? '颠钱中'
-        : '按住颠钱，松开掷出';
-  const handleHoldStart = () => {
-    if (resultAvailable) {
-      return;
-    }
-
-    if (pendingTossId !== null || tossInteractionPhase !== 'idle') {
-      return;
-    }
-
-    pointerHoldingRef.current = true;
-    onTossShakeStart();
-  };
-  const handleRelease = () => {
-    if (!pointerHoldingRef.current) {
-      return;
-    }
-
-    pointerHoldingRef.current = false;
-    onTossRelease();
-  };
+      : '拖动铜钱，松手掷出';
 
   return (
     <section
@@ -1508,42 +1301,66 @@ export default function TabletopScene({
         aria-describedby={throwStatusId}
         aria-label={buttonLabel}
         className="coinInteractionSurface"
-        disabled={tossInteractionPhase === 'released'}
-        onBlur={handleRelease}
-        onKeyDown={(event) => {
-          if (resultAvailable) {
-            return;
-          }
-
-          if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
-            event.preventDefault();
-            handleHoldStart();
-          }
+        disabled={pendingToss !== null}
+        onBlur={() => {
+          pointerHoldingRef.current = false;
+          pointerSamplesRef.current = [];
         }}
-        onKeyUp={(event) => {
-          if (resultAvailable) {
+        onKeyDown={(event) => {
+          if (resultAvailable || pendingToss) {
             return;
           }
 
           if (event.key === ' ' || event.key === 'Enter') {
             event.preventDefault();
-            handleRelease();
           }
         }}
-        onPointerCancel={handleRelease}
+        onKeyUp={(event) => {
+          if (resultAvailable || pendingToss) {
+            return;
+          }
+
+          if (event.key === ' ' || event.key === 'Enter') {
+            event.preventDefault();
+            requestKeyboardToss();
+          }
+        }}
+        onPointerCancel={() => {
+          pointerHoldingRef.current = false;
+          pointerSamplesRef.current = [];
+        }}
         onPointerDown={(event) => {
+          if (resultAvailable || pendingToss) {
+            return;
+          }
+
           event.currentTarget.setPointerCapture?.(event.pointerId);
-          handleHoldStart();
+          pointerHoldingRef.current = true;
+          pointerSamplesRef.current = [readPointerSample(event)];
+        }}
+        onPointerMove={(event) => {
+          if (!pointerHoldingRef.current || pendingToss) {
+            return;
+          }
+
+          pointerSamplesRef.current = [
+            ...pointerSamplesRef.current,
+            readPointerSample(event)
+          ].slice(-8);
         }}
         onClick={() => {
           if (resultAvailable) {
             onOpenResult();
           }
         }}
-        onPointerLeave={handleRelease}
         onPointerUp={(event) => {
           event.currentTarget.releasePointerCapture?.(event.pointerId);
-          handleRelease();
+
+          if (!pointerHoldingRef.current || pendingToss) {
+            return;
+          }
+
+          requestPointerToss(event);
         }}
         type="button"
       >
