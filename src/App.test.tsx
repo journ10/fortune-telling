@@ -3,6 +3,21 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import * as coinTossModule from './domain/coinToss';
+import type { PhysicalTossInput } from './physics/physicalTossInput';
+
+const physicalSimulationMock = vi.hoisted(() => ({
+  calls: [] as Array<{
+    input: PhysicalTossInput | null | undefined;
+    pendingTossKey: string | number | null | undefined;
+  }>,
+  erroredKeys: new Set<string | number>(),
+  mode: 'settle' as 'error' | 'settle',
+  reset() {
+    this.calls = [];
+    this.erroredKeys = new Set();
+    this.mode = 'settle';
+  }
+}));
 
 vi.mock('./components/GestureControl', () => ({
   default: ({
@@ -60,17 +75,34 @@ vi.mock('./hooks/usePhysicalTossSimulation', async () => {
   return {
     usePhysicalTossSimulation: ({
       pendingTossKey,
+      input,
+      onError,
       onSettled
     }: {
+      input: PhysicalTossInput | null | undefined;
+      onError?: (error: unknown) => void;
       pendingTossKey: string | number | null | undefined;
       onSettled: (faces: ['heads', 'tails', 'heads']) => void;
     }) => {
       const [faces, setFaces] = React.useState<['heads', 'tails', 'heads'] | null>(null);
 
       React.useEffect(() => {
+        physicalSimulationMock.calls.push({ input, pendingTossKey });
+      }, [input, pendingTossKey]);
+
+      React.useEffect(() => {
         setFaces(null);
 
         if (!pendingTossKey) {
+          return undefined;
+        }
+
+        if (physicalSimulationMock.mode === 'error') {
+          if (!physicalSimulationMock.erroredKeys.has(pendingTossKey)) {
+            physicalSimulationMock.erroredKeys.add(pendingTossKey);
+            onError?.(new Error('mock physics startup failed'));
+          }
+
           return undefined;
         }
 
@@ -83,7 +115,7 @@ vi.mock('./hooks/usePhysicalTossSimulation', async () => {
         return () => {
           window.clearTimeout(timeoutId);
         };
-      }, [onSettled, pendingTossKey]);
+      }, [onError, onSettled, pendingTossKey]);
 
       return faces
         ? {
@@ -151,6 +183,12 @@ async function startCastingWithDefaultQuestion(user: ReturnType<typeof userEvent
   await user.click(screen.getByRole('button', { name: '开始起卦' }));
 }
 
+function getRequestedPhysicalInputs(): PhysicalTossInput[] {
+  return physicalSimulationMock.calls
+    .map((call) => call.input)
+    .filter((input): input is PhysicalTossInput => Boolean(input));
+}
+
 async function settleOneToss() {
   const tossButton = screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME });
 
@@ -184,6 +222,7 @@ async function settleSixTosses() {
 
 describe('App', () => {
   beforeEach(() => {
+    physicalSimulationMock.reset();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     const storage = new Map<string, string>();
@@ -262,6 +301,27 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
   });
 
+  it('clears a physical toss request when physics startup fails', async () => {
+    const user = userEvent.setup();
+    const tossCoinsSpy = vi.spyOn(coinTossModule, 'tossCoins');
+    physicalSimulationMock.mode = 'error';
+    vi.stubGlobal('fetch', vi.fn());
+
+    render(<App />);
+
+    await saveAiSettings(user, { apiKey: 'sk-user' });
+    await startCastingWithDefaultQuestion(user);
+
+    const tossButton = screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME });
+    fireEvent.pointerDown(tossButton, { clientX: 220, clientY: 260 });
+    fireEvent.pointerMove(tossButton, { clientX: 300, clientY: 210 });
+    fireEvent.pointerUp(tossButton, { clientX: 370, clientY: 170 });
+
+    expect(await screen.findByRole('button', { name: READY_TOSS_BUTTON_NAME })).toBeEnabled();
+    expect(screen.getByRole('status')).toHaveTextContent('第 1 掷 / 共 6 掷');
+    expect(tossCoinsSpy).not.toHaveBeenCalled();
+  });
+
   it('maps the legacy gesture toss callback into a physical pending toss', async () => {
     const user = userEvent.setup();
     vi.stubGlobal('fetch', vi.fn());
@@ -274,6 +334,12 @@ describe('App', () => {
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('button', { name: '模拟手势投掷' }));
 
+    const [input] = getRequestedPhysicalInputs();
+    expect(input).toMatchObject({
+      currentThrow: 1,
+      source: 'keyboard'
+    });
+    expect(input.coins).toHaveLength(3);
     expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
     await advanceTossSettlement();
 
@@ -308,6 +374,15 @@ describe('App', () => {
     fireEvent.click(motionDriveButton);
     fireEvent.click(screen.getByRole('button', { name: '模拟体感释放' }));
 
+    const [input] = getRequestedPhysicalInputs();
+    expect(input).toMatchObject({
+      currentThrow: 1,
+      source: 'motion'
+    });
+    expect(input.energy).toBeGreaterThan(0.4);
+    expect(input.durationMs).toBeGreaterThan(520);
+    expect(input.coins).toHaveLength(3);
+    expect(new Set(input.coins.map((coin) => coin.position.join(','))).size).toBe(3);
     expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
     await advanceTossSettlement();
 

@@ -272,4 +272,62 @@ describe('usePhysicalTossSimulation', () => {
     expect(onSettled).toHaveBeenCalledTimes(2);
     expect(onSettled).toHaveBeenLastCalledWith(secondFaces);
   });
+
+  it('reports an active physics init failure through the error callback', async () => {
+    const input = createKeyboardPhysicalTossInput({
+      currentThrow: 1,
+      perturbationSeed: 0x55555555
+    });
+    const error = new Error('rapier init failed');
+    const onSettled = vi.fn<(settledFaces: [CoinFace, CoinFace, CoinFace]) => void>();
+    const onError = vi.fn<(simulationError: unknown) => void>();
+
+    physicsMock.initCoinPhysics.mockRejectedValue(error);
+
+    renderHook(() =>
+      usePhysicalTossSimulation({
+        pendingTossKey: 'keyboard:error',
+        input,
+        onSettled,
+        onError
+      })
+    );
+
+    await finishPhysicsInit();
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(error);
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(animationFrames).toHaveLength(0);
+  });
+
+  it('reports a simulation creation failure through the error callback', async () => {
+    const input = createKeyboardPhysicalTossInput({
+      currentThrow: 1,
+      perturbationSeed: 0x66666666
+    });
+    const error = new Error('simulation create failed');
+    const onSettled = vi.fn<(settledFaces: [CoinFace, CoinFace, CoinFace]) => void>();
+    const onError = vi.fn<(simulationError: unknown) => void>();
+
+    physicsMock.createCoinPhysicsSimulation.mockImplementation(() => {
+      throw error;
+    });
+
+    renderHook(() =>
+      usePhysicalTossSimulation({
+        pendingTossKey: 'keyboard:create-error',
+        input,
+        onSettled,
+        onError
+      })
+    );
+
+    await finishPhysicsInit();
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(error);
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(animationFrames).toHaveLength(0);
+  });
 });

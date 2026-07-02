@@ -17,6 +17,7 @@ export interface PhysicalTossSimulationParams {
   pendingTossKey: PendingTossKey;
   input: PhysicalTossInput | null | undefined;
   onSettled: (faces: [CoinFace, CoinFace, CoinFace]) => void;
+  onError?: (error: unknown) => void;
 }
 
 function clampDeltaSeconds(deltaSeconds: number): number {
@@ -30,14 +31,20 @@ function clampDeltaSeconds(deltaSeconds: number): number {
 export function usePhysicalTossSimulation({
   pendingTossKey,
   input,
-  onSettled
+  onSettled,
+  onError
 }: PhysicalTossSimulationParams): CoinPhysicsSnapshot | null {
   const [snapshot, setSnapshot] = useState<CoinPhysicsSnapshot | null>(null);
   const onSettledRef = useRef(onSettled);
+  const onErrorRef = useRef(onError);
 
   useEffect(() => {
     onSettledRef.current = onSettled;
   }, [onSettled]);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   useEffect(() => {
     let isActive = true;
@@ -101,9 +108,10 @@ export function usePhysicalTossSimulation({
         simulation = createCoinPhysicsSimulation(input);
         animationFrame = window.requestAnimationFrame(stepFrame);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (isActive) {
           setSnapshot(null);
+          onErrorRef.current?.(error);
         }
       });
 

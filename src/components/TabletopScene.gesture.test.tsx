@@ -21,6 +21,7 @@ describe('TabletopScene gesture trigger', () => {
         resultAvailable={false}
         onOpenResult={vi.fn()}
         onPhysicalTossRequest={onPhysicalTossRequest}
+        onTossSimulationError={vi.fn()}
         onTossSettled={vi.fn()}
       />
     );

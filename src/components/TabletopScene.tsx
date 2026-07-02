@@ -27,11 +27,12 @@ interface TabletopSceneProps {
   resultAvailable: boolean;
   onOpenResult: () => void;
   onPhysicalTossRequest: (input: PhysicalTossInput) => void;
+  onTossSimulationError: (error: unknown) => void;
   onTossSettled: (faces: [CoinFace, CoinFace, CoinFace]) => void;
 }
 
 const FALLBACK_FACES: [CoinFace, CoinFace, CoinFace] = ['heads', 'tails', 'heads'];
-const SETTLE_DELAY_MS = 1700;
+const FALLBACK_ANIMATION_DURATION_MS = 1700;
 const SCENE_WIDTH = 720;
 const SCENE_HEIGHT = 480;
 export { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS };
@@ -898,6 +899,7 @@ export default function TabletopScene({
   resultAvailable,
   onOpenResult,
   onPhysicalTossRequest,
+  onTossSimulationError,
   onTossSettled
 }: TabletopSceneProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -910,6 +912,7 @@ export default function TabletopScene({
   const settledPhysicsFacesKeyRef = useRef<string | null>(null);
   const pointerSamplesRef = useRef<PointerTossSample[]>([]);
   const pointerHoldingRef = useRef(false);
+  const activePointerIdRef = useRef<number | null>(null);
   const [isWebGlActive, setIsWebGlActive] = useState(false);
   const [settledFallbackFaces, setSettledFallbackFaces] = useState<
     [CoinFace, CoinFace, CoinFace] | null
@@ -919,6 +922,7 @@ export default function TabletopScene({
   const physicsSnapshot = usePhysicalTossSimulation({
     pendingTossKey,
     input: pendingToss?.input ?? null,
+    onError: onTossSimulationError,
     onSettled: onTossSettled
   });
 
@@ -1114,7 +1118,9 @@ export default function TabletopScene({
         clock.getDelta();
         const tossStartedAt = tossStartedAtRef.current;
         const tossProgress =
-          tossStartedAt === null ? null : clamp((getTime() - tossStartedAt) / SETTLE_DELAY_MS);
+          tossStartedAt === null
+            ? null
+            : clamp((getTime() - tossStartedAt) / FALLBACK_ANIMATION_DURATION_MS);
         const physicsSnapshot = physicsSnapshotRef.current;
 
         coinGroups.forEach((coin, index) => {
@@ -1238,10 +1244,39 @@ export default function TabletopScene({
     return (Date.now() ^ seedMix) >>> 0;
   }
 
-  const requestPointerToss = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const samples = [...pointerSamplesRef.current, readPointerSample(event)].slice(-8);
+  function clearPointerHold() {
     pointerSamplesRef.current = [];
     pointerHoldingRef.current = false;
+    activePointerIdRef.current = null;
+  }
+
+  function readPointerId(event: React.PointerEvent<HTMLButtonElement>): number {
+    return Number.isFinite(event.pointerId) ? event.pointerId : 0;
+  }
+
+  function hasExplicitPointerIdentity(event: React.PointerEvent<HTMLButtonElement>): boolean {
+    return Boolean(event.pointerType) || readPointerId(event) !== 0;
+  }
+
+  function canStartPointerToss(event: React.PointerEvent<HTMLButtonElement>): boolean {
+    if (event.isPrimary === false && hasExplicitPointerIdentity(event)) {
+      return false;
+    }
+
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function isActivePointer(event: React.PointerEvent<HTMLButtonElement>): boolean {
+    return activePointerIdRef.current === readPointerId(event);
+  }
+
+  const requestPointerToss = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const samples = [...pointerSamplesRef.current, readPointerSample(event)].slice(-8);
+    clearPointerHold();
 
     onPhysicalTossRequest(
       createPointerPhysicalTossInput({
@@ -1302,8 +1337,7 @@ export default function TabletopScene({
         className="coinInteractionSurface"
         disabled={pendingToss !== null}
         onBlur={() => {
-          pointerHoldingRef.current = false;
-          pointerSamplesRef.current = [];
+          clearPointerHold();
         }}
         onKeyDown={(event) => {
           if (resultAvailable || pendingToss) {
@@ -1324,21 +1358,32 @@ export default function TabletopScene({
             requestKeyboardToss();
           }
         }}
-        onPointerCancel={() => {
-          pointerHoldingRef.current = false;
-          pointerSamplesRef.current = [];
-        }}
-        onPointerDown={(event) => {
-          if (resultAvailable || pendingToss) {
+        onPointerCancel={(event) => {
+          if (!isActivePointer(event)) {
             return;
           }
 
-          event.currentTarget.setPointerCapture?.(event.pointerId);
+          clearPointerHold();
+        }}
+        onPointerDown={(event) => {
+          if (
+            resultAvailable ||
+            pendingToss ||
+            pointerHoldingRef.current ||
+            !canStartPointerToss(event)
+          ) {
+            return;
+          }
+
+          const pointerId = readPointerId(event);
+
+          event.currentTarget.setPointerCapture?.(pointerId);
           pointerHoldingRef.current = true;
+          activePointerIdRef.current = pointerId;
           pointerSamplesRef.current = [readPointerSample(event)];
         }}
         onPointerMove={(event) => {
-          if (!pointerHoldingRef.current || pendingToss) {
+          if (!pointerHoldingRef.current || pendingToss || !isActivePointer(event)) {
             return;
           }
 
@@ -1353,12 +1398,11 @@ export default function TabletopScene({
           }
         }}
         onPointerUp={(event) => {
-          event.currentTarget.releasePointerCapture?.(event.pointerId);
-
-          if (!pointerHoldingRef.current || pendingToss) {
+          if (!pointerHoldingRef.current || pendingToss || !isActivePointer(event)) {
             return;
           }
 
+          event.currentTarget.releasePointerCapture?.(readPointerId(event));
           requestPointerToss(event);
         }}
         type="button"

@@ -101,6 +101,7 @@ describe('TabletopScene physics settlement', () => {
         resultAvailable={false}
         onOpenResult={vi.fn()}
         onPhysicalTossRequest={vi.fn()}
+        onTossSimulationError={vi.fn()}
         onTossSettled={onTossSettled}
       />
     );

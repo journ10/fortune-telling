@@ -32,6 +32,7 @@ interface RenderTabletopSceneOptions {
   resultAvailable?: boolean;
   onOpenResult?: () => void;
   onPhysicalTossRequest?: (input: PhysicalTossInput) => void;
+  onTossSimulationError?: (error: unknown) => void;
   onTossSettled?: (faces: [CoinFace, CoinFace, CoinFace]) => void;
 }
 
@@ -51,6 +52,7 @@ function renderTabletopScene({
   resultAvailable = false,
   onOpenResult = vi.fn(),
   onPhysicalTossRequest = vi.fn(),
+  onTossSimulationError = vi.fn(),
   onTossSettled = vi.fn()
 }: RenderTabletopSceneOptions = {}) {
   render(
@@ -60,11 +62,12 @@ function renderTabletopScene({
       resultAvailable={resultAvailable}
       onOpenResult={onOpenResult}
       onPhysicalTossRequest={onPhysicalTossRequest}
+      onTossSimulationError={onTossSimulationError}
       onTossSettled={onTossSettled}
     />
   );
 
-  return { onOpenResult, onPhysicalTossRequest, onTossSettled };
+  return { onOpenResult, onPhysicalTossRequest, onTossSimulationError, onTossSettled };
 }
 
 beforeEach(() => {
@@ -292,6 +295,101 @@ describe('TabletopScene', () => {
     expect(onPhysicalTossRequest.mock.calls[0][0].coins).toHaveLength(3);
   });
 
+  it('ignores secondary mouse pointer toss attempts', () => {
+    const onPhysicalTossRequest = vi.fn();
+
+    renderTabletopScene({ onPhysicalTossRequest });
+
+    const button = screen.getByRole('button', { name: '拖动铜钱，松手掷出' });
+    fireEvent.pointerDown(button, {
+      button: 2,
+      clientX: 210,
+      clientY: 250,
+      isPrimary: true,
+      pointerId: 1,
+      pointerType: 'mouse'
+    });
+    fireEvent.pointerMove(button, {
+      clientX: 260,
+      clientY: 220,
+      isPrimary: true,
+      pointerId: 1,
+      pointerType: 'mouse'
+    });
+    fireEvent.pointerUp(button, {
+      clientX: 340,
+      clientY: 180,
+      isPrimary: true,
+      pointerId: 1,
+      pointerType: 'mouse'
+    });
+
+    expect(onPhysicalTossRequest).not.toHaveBeenCalled();
+  });
+
+  it('ignores non-primary pointer toss attempts', () => {
+    const onPhysicalTossRequest = vi.fn();
+
+    renderTabletopScene({ onPhysicalTossRequest });
+
+    const button = screen.getByRole('button', { name: '拖动铜钱，松手掷出' });
+    fireEvent.pointerDown(button, {
+      clientX: 210,
+      clientY: 250,
+      isPrimary: false,
+      pointerId: 2,
+      pointerType: 'touch'
+    });
+    fireEvent.pointerMove(button, {
+      clientX: 260,
+      clientY: 220,
+      isPrimary: false,
+      pointerId: 2,
+      pointerType: 'touch'
+    });
+    fireEvent.pointerUp(button, {
+      clientX: 340,
+      clientY: 180,
+      isPrimary: false,
+      pointerId: 2,
+      pointerType: 'touch'
+    });
+
+    expect(onPhysicalTossRequest).not.toHaveBeenCalled();
+  });
+
+  it('ignores pointer releases from a different active pointer', () => {
+    const onPhysicalTossRequest = vi.fn();
+
+    renderTabletopScene({ onPhysicalTossRequest });
+
+    const button = screen.getByRole('button', { name: '拖动铜钱，松手掷出' });
+    fireEvent.pointerDown(button, {
+      button: 0,
+      clientX: 210,
+      clientY: 250,
+      isPrimary: true,
+      pointerId: 3,
+      pointerType: 'touch'
+    });
+    fireEvent.pointerMove(button, {
+      clientX: 260,
+      clientY: 220,
+      isPrimary: true,
+      pointerId: 4,
+      pointerType: 'touch'
+    });
+    fireEvent.pointerUp(button, {
+      clientX: 340,
+      clientY: 180,
+      isPrimary: true,
+      pointerId: 4,
+      pointerType: 'touch'
+    });
+
+    expect(onPhysicalTossRequest).not.toHaveBeenCalled();
+  });
+
   it('creates a keyboard physical toss on Enter release', () => {
     const onPhysicalTossRequest = vi.fn();
 
@@ -366,6 +464,7 @@ describe('TabletopScene', () => {
         resultAvailable={false}
         onOpenResult={vi.fn()}
         onPhysicalTossRequest={vi.fn()}
+        onTossSimulationError={vi.fn()}
         onTossSettled={firstSettled}
       />
     );
@@ -377,6 +476,7 @@ describe('TabletopScene', () => {
         resultAvailable={false}
         onOpenResult={vi.fn()}
         onPhysicalTossRequest={vi.fn()}
+        onTossSimulationError={vi.fn()}
         onTossSettled={secondSettled}
       />
     );

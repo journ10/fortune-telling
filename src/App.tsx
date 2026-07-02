@@ -287,6 +287,17 @@ export default function App() {
     [session]
   );
 
+  const handleTossSimulationError = useCallback(() => {
+    if (pendingTossRef.current === null) {
+      return;
+    }
+
+    pendingTossRef.current = null;
+    setPendingToss(null);
+    motionSeedMixRef.current = 0;
+    motionTossEnergyRef.current = null;
+  }, []);
+
   const resetCasting = useCallback(() => {
     pendingTossRef.current = null;
     setPendingToss(null);
@@ -319,6 +330,7 @@ export default function App() {
         resultAvailable={resultAvailable}
         onOpenResult={() => setActiveDialog('result')}
         onPhysicalTossRequest={requestPhysicalToss}
+        onTossSimulationError={handleTossSimulationError}
         onTossSettled={settlePhysicalToss}
       />
 
