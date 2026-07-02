@@ -86,7 +86,20 @@ export function usePhysicalTossSimulation({
 
       lastFrameTimestamp = timestamp;
 
-      const nextSnapshot = simulation.step(deltaSeconds);
+      let nextSnapshot: CoinPhysicsSnapshot;
+
+      try {
+        nextSnapshot = simulation.step(deltaSeconds);
+      } catch (error) {
+        if (isActive) {
+          setSnapshot(null);
+          onErrorRef.current?.(error);
+        }
+
+        disposeSimulation();
+        return;
+      }
+
       setSnapshot(nextSnapshot);
 
       if (nextSnapshot.settled && nextSnapshot.faces && !hasSettled) {

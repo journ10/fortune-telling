@@ -330,4 +330,39 @@ describe('usePhysicalTossSimulation', () => {
     expect(onSettled).not.toHaveBeenCalled();
     expect(animationFrames).toHaveLength(0);
   });
+
+  it('reports a simulation step failure through the error callback', async () => {
+    const input = createKeyboardPhysicalTossInput({
+      currentThrow: 1,
+      perturbationSeed: 0x77777777
+    });
+    const error = new Error('simulation step failed');
+    const dispose = vi.fn();
+    const simulation = createSimulation(vi.fn(() => {
+      throw error;
+    }), dispose);
+    const onSettled = vi.fn<(settledFaces: [CoinFace, CoinFace, CoinFace]) => void>();
+    const onError = vi.fn<(simulationError: unknown) => void>();
+
+    physicsMock.createCoinPhysicsSimulation.mockReturnValue(simulation);
+
+    const { result } = renderHook(() =>
+      usePhysicalTossSimulation({
+        pendingTossKey: 'keyboard:step-error',
+        input,
+        onSettled,
+        onError
+      })
+    );
+
+    await finishPhysicsInit();
+    runNextAnimationFrame(16);
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(error);
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(animationFrames).toHaveLength(0);
+    expect(result.current).toBeNull();
+  });
 });
