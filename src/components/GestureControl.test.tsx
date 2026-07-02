@@ -50,32 +50,40 @@ describe('GestureControl', () => {
   });
 
   it('shows a floating camera enable prompt while casting', () => {
-    render(<GestureControl isCasting={true} isTossing={false} onGestureToss={vi.fn()} />);
+    render(<GestureControl isCasting={true} isTossing={false} onUseTabletopToss={vi.fn()} />);
 
     expect(screen.getByRole('dialog', { name: '手势投掷' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '启用摄像头' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '手动投掷' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '改用桌面投掷' })).toBeInTheDocument();
   });
 
   it('returns null when casting is not active', () => {
-    render(<GestureControl isCasting={false} isTossing={false} onGestureToss={vi.fn()} />);
+    render(<GestureControl isCasting={false} isTossing={false} onUseTabletopToss={vi.fn()} />);
 
     expect(screen.queryByRole('dialog', { name: '手势投掷' })).not.toBeInTheDocument();
   });
 
-  it('hides the prompt when manual tossing is selected', async () => {
+  it('hides the prompt when tabletop tossing is selected', async () => {
     const user = userEvent.setup();
+    const onUseTabletopToss = vi.fn();
 
-    render(<GestureControl isCasting={true} isTossing={false} onGestureToss={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: '手动投掷' }));
+    render(
+      <GestureControl
+        isCasting={true}
+        isTossing={false}
+        onUseTabletopToss={onUseTabletopToss}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: '改用桌面投掷' }));
 
     expect(screen.queryByRole('dialog', { name: '手势投掷' })).not.toBeInTheDocument();
+    expect(onUseTabletopToss).toHaveBeenCalledTimes(1);
   });
 
   it('starts the camera and recognizer when enabled', async () => {
     const user = userEvent.setup();
 
-    render(<GestureControl isCasting={true} isTossing={false} onGestureToss={vi.fn()} />);
+    render(<GestureControl isCasting={true} isTossing={false} onUseTabletopToss={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: '启用摄像头' }));
 
     await waitFor(() => {
@@ -90,12 +98,12 @@ describe('GestureControl', () => {
     const user = userEvent.setup();
     vi.mocked(startCamera).mockRejectedValueOnce(new Error('摄像头权限被拒绝'));
 
-    render(<GestureControl isCasting={true} isTossing={false} onGestureToss={vi.fn()} />);
+    render(<GestureControl isCasting={true} isTossing={false} onUseTabletopToss={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: '启用摄像头' }));
 
     expect(await screen.findByText('摄像头权限被拒绝')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重试摄像头' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '手动投掷' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '改用桌面投掷' })).toBeInTheDocument();
   });
 
   it('renders an error and stops the camera when recognizer startup fails', async () => {
@@ -104,13 +112,13 @@ describe('GestureControl', () => {
     vi.mocked(startCamera).mockResolvedValueOnce(stream);
     vi.mocked(createMediaPipeRecognizer).mockRejectedValueOnce(new Error('识别模型加载失败'));
 
-    render(<GestureControl isCasting={true} isTossing={false} onGestureToss={vi.fn()} />);
+    render(<GestureControl isCasting={true} isTossing={false} onUseTabletopToss={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: '启用摄像头' }));
 
     expect(await screen.findByText('识别模型加载失败')).toBeInTheDocument();
     expect(stopCamera).toHaveBeenCalledWith(stream);
     expect(screen.getByRole('button', { name: '重试摄像头' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '手动投掷' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '改用桌面投掷' })).toBeInTheDocument();
   });
 
   it('ignores stale camera startup errors after manual dismiss', async () => {
@@ -118,9 +126,9 @@ describe('GestureControl', () => {
     const cameraStartup = createDeferred<MediaStream>();
     vi.mocked(startCamera).mockReturnValueOnce(cameraStartup.promise);
 
-    render(<GestureControl isCasting={true} isTossing={false} onGestureToss={vi.fn()} />);
+    render(<GestureControl isCasting={true} isTossing={false} onUseTabletopToss={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: '启用摄像头' }));
-    await user.click(screen.getByRole('button', { name: '手动投掷' }));
+    await user.click(screen.getByRole('button', { name: '改用桌面投掷' }));
 
     expect(screen.queryByRole('dialog', { name: '手势投掷' })).not.toBeInTheDocument();
 
@@ -140,7 +148,7 @@ describe('GestureControl', () => {
     const firstRecognizerStartup = createDeferred<Awaited<ReturnType<typeof createMediaPipeRecognizer>>>();
     const firstRecognizer = createMockRecognizer();
     const secondRecognizer = createMockRecognizer();
-    const onGestureToss = vi.fn();
+    const onUseTabletopToss = vi.fn();
 
     vi.mocked(startCamera)
       .mockResolvedValueOnce(firstStream)
@@ -150,7 +158,11 @@ describe('GestureControl', () => {
       .mockResolvedValueOnce(secondRecognizer);
 
     const { rerender } = render(
-      <GestureControl isCasting={true} isTossing={false} onGestureToss={onGestureToss} />
+      <GestureControl
+        isCasting={true}
+        isTossing={false}
+        onUseTabletopToss={onUseTabletopToss}
+      />
     );
 
     await user.click(screen.getByRole('button', { name: '启用摄像头' }));
@@ -158,12 +170,24 @@ describe('GestureControl', () => {
       expect(createMediaPipeRecognizer).toHaveBeenCalledTimes(1);
     });
 
-    rerender(<GestureControl isCasting={false} isTossing={false} onGestureToss={onGestureToss} />);
+    rerender(
+      <GestureControl
+        isCasting={false}
+        isTossing={false}
+        onUseTabletopToss={onUseTabletopToss}
+      />
+    );
     await waitFor(() => {
       expect(stopCamera).toHaveBeenCalledWith(firstStream);
     });
 
-    rerender(<GestureControl isCasting={true} isTossing={false} onGestureToss={onGestureToss} />);
+    rerender(
+      <GestureControl
+        isCasting={true}
+        isTossing={false}
+        onUseTabletopToss={onUseTabletopToss}
+      />
+    );
     await user.click(screen.getByRole('button', { name: '启用摄像头' }));
 
     await waitFor(() => {

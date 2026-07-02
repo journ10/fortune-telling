@@ -11,20 +11,20 @@ import {
 interface GestureControlProps {
   isCasting: boolean;
   isTossing: boolean;
-  onGestureToss: () => void;
+  onUseTabletopToss: () => void;
 }
 
 type GestureMode = 'prompt' | 'starting' | 'active' | 'error' | 'dismissed';
 type GestureRecognizerInstance = Awaited<ReturnType<typeof createMediaPipeRecognizer>>;
 
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '摄像头启动失败，请重试或改用手动投掷。';
+  return error instanceof Error ? error.message : '摄像头启动失败，请重试或改用桌面投掷。';
 }
 
 export default function GestureControl({
   isCasting,
   isTossing,
-  onGestureToss
+  onUseTabletopToss
 }: GestureControlProps) {
   const [mode, setMode] = useState<GestureMode>('prompt');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -35,15 +35,15 @@ export default function GestureControl({
   const frameRef = useRef<number | null>(null);
   const startupTokenRef = useRef(0);
   const isTossingRef = useRef(isTossing);
-  const onGestureTossRef = useRef(onGestureToss);
+  const onUseTabletopTossRef = useRef(onUseTabletopToss);
 
   useEffect(() => {
     isTossingRef.current = isTossing;
   }, [isTossing]);
 
   useEffect(() => {
-    onGestureTossRef.current = onGestureToss;
-  }, [onGestureToss]);
+    onUseTabletopTossRef.current = onUseTabletopToss;
+  }, [onUseTabletopToss]);
 
   const cleanupSession = useCallback(() => {
     if (frameRef.current !== null) {
@@ -68,6 +68,13 @@ export default function GestureControl({
     }
   }, []);
 
+  const handleUseTabletopToss = useCallback(() => {
+    startupTokenRef.current += 1;
+    cleanupSession();
+    setMode('dismissed');
+    onUseTabletopTossRef.current();
+  }, [cleanupSession]);
+
   const runRecognitionLoop = useCallback(() => {
     const video = videoRef.current;
     const recognizer = recognizerRef.current;
@@ -79,18 +86,19 @@ export default function GestureControl({
       const gesture = getTopGesture(result);
 
       if (!isTossingRef.current && gate.update(gesture, timestamp)) {
-        onGestureTossRef.current();
+        handleUseTabletopToss();
+        return;
       }
     }
 
     frameRef.current = requestAnimationFrame(runRecognitionLoop);
-  }, []);
+  }, [handleUseTabletopToss]);
 
   const handleEnableCamera = useCallback(async () => {
     const video = videoRef.current;
 
     if (!video) {
-      setErrorMessage('摄像头预览尚未准备好，请重试或改用手动投掷。');
+      setErrorMessage('摄像头预览尚未准备好，请重试或改用桌面投掷。');
       setMode('error');
       return;
     }
@@ -131,12 +139,6 @@ export default function GestureControl({
       setMode('error');
     }
   }, [cleanupSession, runRecognitionLoop]);
-
-  const handleManualToss = useCallback(() => {
-    startupTokenRef.current += 1;
-    cleanupSession();
-    setMode('dismissed');
-  }, [cleanupSession]);
 
   useEffect(() => {
     if (!isCasting) {
@@ -180,7 +182,7 @@ export default function GestureControl({
           <p className="gestureStatus" role="status">
             摄像头已启用
           </p>
-          <p className="gestureStatus">握拳后张开手即可投掷。</p>
+          <p className="gestureStatus">握拳后张开手，将改用桌面投掷。</p>
         </>
       ) : null}
 
@@ -212,8 +214,8 @@ export default function GestureControl({
           </button>
         )}
 
-        <button className="secondaryButton" type="button" onClick={handleManualToss}>
-          手动投掷
+        <button className="secondaryButton" type="button" onClick={handleUseTabletopToss}>
+          改用桌面投掷
         </button>
       </div>
     </aside>

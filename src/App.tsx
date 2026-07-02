@@ -12,12 +12,7 @@ import TabletopScene from './components/TabletopScene';
 import { createCoinToss } from './domain/coinToss';
 import type { AiInterpretation, CoinFace, QuestionType } from './domain/types';
 import { useCastingSession } from './hooks/useCastingSession';
-import {
-  createKeyboardPhysicalTossInput,
-  createMotionPhysicalTossInput,
-  type PhysicalTossInput,
-  type Vec3Tuple
-} from './physics/physicalTossInput';
+import type { PhysicalTossInput } from './physics/physicalTossInput';
 
 type ActiveDialog = 'ai-settings' | 'question' | 'result' | null;
 type AiSettingsState = typeof DEFAULT_AI_SETTINGS;
@@ -27,28 +22,8 @@ interface PendingPhysicalToss {
   input: PhysicalTossInput;
 }
 
-function createRandomTossSeed(): number {
-  const values = new Uint32Array(1);
-  const cryptoSource = globalThis.crypto;
-
-  if (cryptoSource?.getRandomValues) {
-    cryptoSource.getRandomValues(values);
-    return values[0] >>> 0;
-  }
-
-  return (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-}
-
 function hasCompleteAiSettings(settings: AiSettingsState): boolean {
   return Boolean(settings.apiKey.trim() && settings.apiUrl.trim() && settings.model.trim());
-}
-
-function clampMotionEnergy(energy: number): number {
-  if (!Number.isFinite(energy)) {
-    return 0;
-  }
-
-  return Math.min(Math.max(energy, 0), 1.15);
 }
 
 export default function App() {
@@ -63,8 +38,6 @@ export default function App() {
   const [aiRequestNonce, setAiRequestNonce] = useState(0);
   const nextTossIdRef = useRef(1);
   const pendingTossRef = useRef<PendingPhysicalToss | null>(null);
-  const motionSeedMixRef = useRef(0);
-  const motionTossEnergyRef = useRef<number | null>(null);
   const isAiConfigured = hasCompleteAiSettings(aiSettings);
   const isSubmittedAiConfigured = hasCompleteAiSettings(submittedAiSettings);
   const resultAvailable = session.phase === 'result' && Boolean(session.castingResult);
@@ -198,8 +171,6 @@ export default function App() {
     (question: string, questionType: QuestionType) => {
       pendingTossRef.current = null;
       setPendingToss(null);
-      motionSeedMixRef.current = 0;
-      motionTossEnergyRef.current = null;
       nextTossIdRef.current = 1;
       setAiInterpretation(null);
       setAiStatus(null);
@@ -220,57 +191,9 @@ export default function App() {
       const pending = { id: tossId, input };
       pendingTossRef.current = pending;
       setPendingToss(pending);
-      motionSeedMixRef.current = 0;
-      motionTossEnergyRef.current = null;
     },
     [session.phase]
   );
-
-  const startTossShake = useCallback((seedMix = 0) => {
-    if (session.phase !== 'casting' || pendingTossRef.current !== null) {
-      return;
-    }
-
-    motionSeedMixRef.current = seedMix >>> 0;
-  }, [session.phase]);
-
-  const requestToss = useCallback(() => {
-    motionTossEnergyRef.current = null;
-    requestPhysicalToss(
-      createKeyboardPhysicalTossInput({
-        currentThrow: session.currentThrow,
-        perturbationSeed: (createRandomTossSeed() ^ session.currentThrow) >>> 0
-      })
-    );
-  }, [requestPhysicalToss, session.currentThrow]);
-
-  const driveMotionToss = useCallback((energy: number) => {
-    motionTossEnergyRef.current = clampMotionEnergy(energy);
-  }, []);
-
-  const releaseMotionToss = useCallback((digest: number) => {
-    const energy = Math.max(motionTossEnergyRef.current ?? 0, digest > 0 ? 0.52 : 0);
-    const digestSeed = (digest ^ motionSeedMixRef.current) >>> 0;
-    const dominantAcceleration: Vec3Tuple = [energy || 0.52, 0, -1];
-    const rotationBias: Vec3Tuple = [
-      (digest & 0xff) - 128,
-      ((digest >>> 8) & 0xff) - 128,
-      ((digest >>> 16) & 0xff) - 128
-    ];
-
-    requestPhysicalToss(
-      createMotionPhysicalTossInput({
-        currentThrow: session.currentThrow,
-        digest,
-        dominantAcceleration,
-        durationMs: Math.round(520 + energy * 360),
-        energy,
-        peakCount: digest > 0 ? 1 : 0,
-        perturbationSeed: (createRandomTossSeed() ^ digestSeed) >>> 0,
-        rotationBias
-      })
-    );
-  }, [requestPhysicalToss, session.currentThrow]);
 
   const settlePhysicalToss = useCallback(
     (faces: [CoinFace, CoinFace, CoinFace]) => {
@@ -281,8 +204,6 @@ export default function App() {
       pendingTossRef.current = null;
       session.recordToss(createCoinToss(faces));
       setPendingToss(null);
-      motionSeedMixRef.current = 0;
-      motionTossEnergyRef.current = null;
     },
     [session]
   );
@@ -294,15 +215,11 @@ export default function App() {
 
     pendingTossRef.current = null;
     setPendingToss(null);
-    motionSeedMixRef.current = 0;
-    motionTossEnergyRef.current = null;
   }, []);
 
   const resetCasting = useCallback(() => {
     pendingTossRef.current = null;
     setPendingToss(null);
-    motionSeedMixRef.current = 0;
-    motionTossEnergyRef.current = null;
     nextTossIdRef.current = 1;
     setAiInterpretation(null);
     setAiStatus(null);
@@ -346,14 +263,13 @@ export default function App() {
           currentThrow={session.currentThrow}
           isCasting={session.phase === 'casting'}
           isTossing={pendingToss !== null}
-          onMotionDrive={driveMotionToss}
           onPhysicalTossRequest={requestPhysicalToss}
         />
       ) : (
         <GestureControl
           isCasting={session.phase === 'casting'}
           isTossing={pendingToss !== null}
-          onGestureToss={requestToss}
+          onUseTabletopToss={() => undefined}
         />
       )}
 

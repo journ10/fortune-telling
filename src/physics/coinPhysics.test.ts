@@ -195,6 +195,45 @@ describe('coinPhysics', () => {
     simulation.dispose();
   });
 
+  it('does not produce an obvious one-sided face bias for synthetic normal inputs', async () => {
+    await initCoinPhysics();
+    let heads = 0;
+    let total = 0;
+
+    for (let index = 0; index < 24; index += 1) {
+      const simulation = createCoinPhysicsSimulation(
+        createPointerPhysicalTossInput({
+          currentThrow: (index % 6) + 1,
+          sceneWidth: 720,
+          sceneHeight: 480,
+          perturbationSeed: 0x1000 + index * 0x12345,
+          samples: [
+            { x: 210 + index * 3, y: 260, timestamp: 0 },
+            { x: 285 + index * 2, y: 220 - (index % 5) * 6, timestamp: 95 },
+            { x: 360 + index, y: 170 + (index % 4) * 5, timestamp: 185 }
+          ]
+        })
+      );
+      let snapshot = simulation.snapshot();
+
+      for (let step = 0; step < 900 && !snapshot.settled; step += 1) {
+        snapshot = simulation.step(1 / 60);
+      }
+
+      snapshot.faces?.forEach((face) => {
+        if (face === 'heads') {
+          heads += 1;
+        }
+        total += 1;
+      });
+      simulation.dispose();
+    }
+
+    expect(total).toBe(72);
+    expect(heads).toBeGreaterThan(20);
+    expect(heads).toBeLessThan(52);
+  });
+
   it('uses timeout-readable settlement from body rotations instead of generated faces', async () => {
     await initCoinPhysics();
     const input = createPointerPhysicalTossInput({

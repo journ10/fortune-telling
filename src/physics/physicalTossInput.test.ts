@@ -49,6 +49,35 @@ describe('physical toss input mapping', () => {
     });
   });
 
+  it('creates balanced initial face orientations across synthetic pointer inputs', () => {
+    const angularSigns = { positive: 0, negative: 0 };
+
+    for (let index = 0; index < 80; index += 1) {
+      const input = createPointerPhysicalTossInput({
+        currentThrow: (index % 6) + 1,
+        sceneWidth: 720,
+        sceneHeight: 480,
+        perturbationSeed: index * 0x9e3779b1,
+        samples: [
+          { x: 220 + (index % 9) * 8, y: 260, timestamp: 0 },
+          { x: 290 + (index % 7) * 11, y: 220 - (index % 5) * 6, timestamp: 90 },
+          { x: 360 + (index % 11) * 9, y: 170 + (index % 3) * 8, timestamp: 190 }
+        ]
+      });
+
+      input.coins.forEach((coin) => {
+        if (coin.angularVelocity[0] >= 0) {
+          angularSigns.positive += 1;
+        } else {
+          angularSigns.negative += 1;
+        }
+      });
+    }
+
+    expect(angularSigns.positive).toBeGreaterThan(40);
+    expect(angularSigns.negative).toBeGreaterThan(40);
+  });
+
   it('maps motion summaries into the same physical input contract', () => {
     const input = createMotionPhysicalTossInput({
       currentThrow: 4,

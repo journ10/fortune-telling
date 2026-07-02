@@ -22,16 +22,16 @@ const physicalSimulationMock = vi.hoisted(() => ({
 vi.mock('./components/GestureControl', () => ({
   default: ({
     isCasting,
-    onGestureToss
+    onUseTabletopToss
   }: {
     isCasting: boolean;
     isTossing: boolean;
-    onGestureToss: () => void;
+    onUseTabletopToss: () => void;
   }) =>
     isCasting ? (
       <aside aria-label="手势投掷" role="dialog">
-        <button type="button" onClick={onGestureToss}>
-          模拟手势投掷
+        <button type="button" onClick={onUseTabletopToss}>
+          模拟改用桌面投掷
         </button>
       </aside>
     ) : null
@@ -297,7 +297,7 @@ describe('App', () => {
     expect(screen.queryByText('AI Provider')).not.toBeInTheDocument();
   });
 
-  it('waits for physics-settled faces instead of pre-generating a random toss', async () => {
+  it('does not use tossCoins for pointer, motion, or camera-driven casting UI', async () => {
     const user = userEvent.setup();
     const tossCoinsSpy = vi.spyOn(coinTossModule, 'tossCoins');
     vi.stubGlobal('fetch', vi.fn());
@@ -307,10 +307,14 @@ describe('App', () => {
     await saveAiSettings(user, { apiKey: 'sk-user' });
     await startCastingWithDefaultQuestion(user);
 
+    fireEvent.click(screen.getByRole('button', { name: '模拟改用桌面投掷' }));
+    expect(tossCoinsSpy).not.toHaveBeenCalled();
+    expect(getRequestedPhysicalInputs()).toHaveLength(0);
+
     const tossButton = screen.getByRole('button', { name: '拖动铜钱，松手掷出' });
-    fireEvent.pointerDown(tossButton, { clientX: 220, clientY: 260 });
-    fireEvent.pointerMove(tossButton, { clientX: 300, clientY: 210 });
-    fireEvent.pointerUp(tossButton, { clientX: 370, clientY: 170 });
+    fireEvent.pointerDown(tossButton, { clientX: 200, clientY: 240 });
+    fireEvent.pointerMove(tossButton, { clientX: 290, clientY: 210 });
+    fireEvent.pointerUp(tossButton, { clientX: 360, clientY: 160 });
 
     expect(tossCoinsSpy).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
@@ -337,8 +341,9 @@ describe('App', () => {
     expect(tossCoinsSpy).not.toHaveBeenCalled();
   });
 
-  it('maps the legacy gesture toss callback into a physical pending toss', async () => {
+  it('uses the camera fallback only to return to tabletop tossing', async () => {
     const user = userEvent.setup();
+    const tossCoinsSpy = vi.spyOn(coinTossModule, 'tossCoins');
     vi.stubGlobal('fetch', vi.fn());
 
     render(<App />);
@@ -346,23 +351,17 @@ describe('App', () => {
     await saveAiSettings(user, { apiKey: 'sk-user' });
     await startCastingWithDefaultQuestion(user);
 
-    vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('button', { name: '模拟手势投掷' }));
+    fireEvent.click(screen.getByRole('button', { name: '模拟改用桌面投掷' }));
 
-    const [input] = getRequestedPhysicalInputs();
-    expect(input).toMatchObject({
-      currentThrow: 1,
-      source: 'keyboard'
-    });
-    expect(input.coins).toHaveLength(3);
-    expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
-    await advanceTossSettlement();
-
-    expect(screen.getByRole('status')).toHaveTextContent('第 2 掷 / 共 6 掷');
+    expect(getRequestedPhysicalInputs()).toHaveLength(0);
+    expect(tossCoinsSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME })).toBeEnabled();
+    expect(screen.getByRole('status')).toHaveTextContent('第 1 掷 / 共 6 掷');
   });
 
   it('maps a motion physical toss request into a physical pending toss', async () => {
     const user = userEvent.setup();
+    const tossCoinsSpy = vi.spyOn(coinTossModule, 'tossCoins');
     vi.stubGlobal('DeviceMotionEvent', function DeviceMotionEvent() {});
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
@@ -398,6 +397,7 @@ describe('App', () => {
     expect(input.durationMs).toBeGreaterThan(520);
     expect(input.coins).toHaveLength(3);
     expect(new Set(input.coins.map((coin) => coin.position.join(','))).size).toBe(3);
+    expect(tossCoinsSpy).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
     await advanceTossSettlement();
 

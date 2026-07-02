@@ -76,6 +76,59 @@ function normalizeVector(vector: Vec3Tuple, fallback: Vec3Tuple): Vec3Tuple {
   return [vector[0] / length, vector[1] / length, vector[2] / length];
 }
 
+function normalizeQuaternion(quaternion: QuaternionTuple): QuaternionTuple {
+  const length = Math.hypot(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
+
+  if (length < 0.0001) {
+    return [0, 0, 0, 1];
+  }
+
+  return [
+    quaternion[0] / length,
+    quaternion[1] / length,
+    quaternion[2] / length,
+    quaternion[3] / length
+  ];
+}
+
+function createAxisAngleQuaternion(axis: Vec3Tuple, angle: number): QuaternionTuple {
+  const halfAngle = angle / 2;
+  const sinHalfAngle = Math.sin(halfAngle);
+
+  return [
+    axis[0] * sinHalfAngle,
+    axis[1] * sinHalfAngle,
+    axis[2] * sinHalfAngle,
+    Math.cos(halfAngle)
+  ];
+}
+
+function multiplyQuaternions(left: QuaternionTuple, right: QuaternionTuple): QuaternionTuple {
+  const [leftX, leftY, leftZ, leftW] = left;
+  const [rightX, rightY, rightZ, rightW] = right;
+
+  return [
+    leftW * rightX + leftX * rightW + leftY * rightZ - leftZ * rightY,
+    leftW * rightY - leftX * rightZ + leftY * rightW + leftZ * rightX,
+    leftW * rightZ + leftX * rightY - leftY * rightX + leftZ * rightW,
+    leftW * rightW - leftX * rightX - leftY * rightY - leftZ * rightZ
+  ];
+}
+
+function createInitialCoinRotation(random: () => number, slot: number): QuaternionTuple {
+  const faceFlip = random() >= 0.5 ? 0 : Math.PI;
+  const yaw = random() * Math.PI * 2;
+  const tiltX = (random() - 0.5) * 0.42;
+  const tiltZ = (random() - 0.5) * 0.42 + slot * 0.21;
+  const yawRotation = createAxisAngleQuaternion([0, 1, 0], yaw);
+  const faceRotation = createAxisAngleQuaternion([1, 0, 0], faceFlip + tiltX);
+  const tiltRotation = createAxisAngleQuaternion([0, 0, 1], tiltZ);
+
+  return normalizeQuaternion(
+    multiplyQuaternions(multiplyQuaternions(yawRotation, faceRotation), tiltRotation)
+  );
+}
+
 function ensureMinimumAngularVelocity(vector: Vec3Tuple): Vec3Tuple {
   const minimumAngularSpeed = 2.05;
   const length = Math.hypot(vector[0], vector[1], vector[2]);
@@ -115,8 +168,13 @@ function createCoinStates(
     const jitter = () => (random() - 0.5) * perturbationScale;
     const verticalLift = 0.72 + energy * 0.52 + random() * 0.08;
     const spread = 0.24 + energy * 0.12;
+    const rawAngularVelocityX =
+      spinBias[0] * (0.018 + energy * 0.012) + slot * (2.2 + energy) + jitter() * 6;
+    const pointerAngularVelocityX =
+      (random() >= 0.5 ? 1 : -1) * Math.max(Math.abs(rawAngularVelocityX), 0.75 + energy * 2);
+    const rotation = createInitialCoinRotation(random, slot);
     const angularVelocity: Vec3Tuple = [
-      spinBias[0] * (0.018 + energy * 0.012) + slot * (2.2 + energy) + jitter() * 6,
+      source === 'pointer' ? pointerAngularVelocityX : rawAngularVelocityX,
       spinBias[1] * (0.012 + energy * 0.01) + (random() - 0.5) * 5.5,
       spinBias[2] * (0.018 + energy * 0.012) + (random() - 0.5) * 7.5
     ];
@@ -127,12 +185,7 @@ function createCoinStates(
         verticalLift + entry * 0.035 + jitter() * 0.4,
         -0.16 + slot * 0.04 + jitter()
       ],
-      rotation: [
-        (random() - 0.5) * 0.42,
-        random() * Math.PI * 2,
-        (random() - 0.5) * 0.42 + slot * 0.21,
-        1
-      ],
+      rotation,
       linearVelocity: [
         safeDirection[0] * (0.74 + energy * 1.28) + slot * 0.12 + jitter(),
         1.04 + energy * 1.72 + random() * 0.16,
