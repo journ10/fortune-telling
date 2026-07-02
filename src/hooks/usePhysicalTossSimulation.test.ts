@@ -3,13 +3,21 @@ import * as THREE from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CoinFace } from '../domain/types';
 import type { CoinPhysicsSimulation, CoinPhysicsSnapshot } from '../physics/coinPhysics';
-import { createKeyboardPhysicalTossInput } from '../physics/physicalTossInput';
+import {
+  createKeyboardPhysicalTossInput,
+  type PhysicalTossInput
+} from '../physics/physicalTossInput';
 import { usePhysicalTossSimulation } from './usePhysicalTossSimulation';
 
 const physicsMock = vi.hoisted(() => ({
   createCoinPhysicsSimulation: vi.fn(),
   initCoinPhysics: vi.fn()
 }));
+
+interface TossSimulationTestProps {
+  input: PhysicalTossInput | null;
+  pendingTossKey: string | null;
+}
 
 vi.mock('../physics/coinPhysics', () => ({
   createCoinPhysicsSimulation: physicsMock.createCoinPhysicsSimulation,
@@ -50,6 +58,9 @@ describe('usePhysicalTossSimulation', () => {
   let nextFrameId: number;
 
   beforeEach(() => {
+    physicsMock.createCoinPhysicsSimulation.mockReset();
+    physicsMock.initCoinPhysics.mockReset();
+
     animationFrames = new Map();
     nextFrameId = 1;
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
@@ -158,8 +169,8 @@ describe('usePhysicalTossSimulation', () => {
       .mockReturnValueOnce(firstSimulation)
       .mockReturnValueOnce(secondSimulation);
 
-    const { rerender } = renderHook(
-      ({ input, pendingTossKey }) =>
+    const { rerender } = renderHook<CoinPhysicsSnapshot | null, TossSimulationTestProps>(
+      ({ input, pendingTossKey }: TossSimulationTestProps) =>
         usePhysicalTossSimulation({
           pendingTossKey,
           input,
@@ -187,5 +198,78 @@ describe('usePhysicalTossSimulation', () => {
 
     expect(physicsMock.createCoinPhysicsSimulation).toHaveBeenCalledWith(secondInput);
     expect(secondDispose).not.toHaveBeenCalled();
+  });
+
+  it('settles again when the same toss key is reused after returning to idle', async () => {
+    const firstFaces: [CoinFace, CoinFace, CoinFace] = ['heads', 'tails', 'heads'];
+    const secondFaces: [CoinFace, CoinFace, CoinFace] = ['tails', 'heads', 'tails'];
+    const firstInput = createKeyboardPhysicalTossInput({
+      currentThrow: 1,
+      perturbationSeed: 0x33333333
+    });
+    const secondInput = createKeyboardPhysicalTossInput({
+      currentThrow: 1,
+      perturbationSeed: 0x44444444
+    });
+    const firstSimulation = createSimulation(
+      vi.fn(() =>
+        createSnapshot({
+          faces: firstFaces,
+          settled: true,
+          settledReason: 'strict'
+        })
+      )
+    );
+    const secondSimulation = createSimulation(
+      vi.fn(() =>
+        createSnapshot({
+          faces: secondFaces,
+          settled: true,
+          settledReason: 'strict'
+        })
+      )
+    );
+    const onSettled = vi.fn<(settledFaces: [CoinFace, CoinFace, CoinFace]) => void>();
+
+    physicsMock.createCoinPhysicsSimulation
+      .mockReturnValueOnce(firstSimulation)
+      .mockReturnValueOnce(secondSimulation);
+
+    const { rerender } = renderHook<CoinPhysicsSnapshot | null, TossSimulationTestProps>(
+      ({ input, pendingTossKey }: TossSimulationTestProps) =>
+        usePhysicalTossSimulation({
+          pendingTossKey,
+          input,
+          onSettled
+        }),
+      {
+        initialProps: {
+          input: firstInput,
+          pendingTossKey: 'A'
+        } satisfies TossSimulationTestProps
+      }
+    );
+
+    await finishPhysicsInit();
+    runNextAnimationFrame(16);
+
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    expect(onSettled).toHaveBeenLastCalledWith(firstFaces);
+
+    rerender({
+      input: null,
+      pendingTossKey: null
+    });
+
+    rerender({
+      input: secondInput,
+      pendingTossKey: 'A'
+    });
+
+    await finishPhysicsInit();
+    runNextAnimationFrame(32);
+
+    expect(onSettled).toHaveBeenCalledTimes(2);
+    expect(onSettled).toHaveBeenLastCalledWith(secondFaces);
   });
 });

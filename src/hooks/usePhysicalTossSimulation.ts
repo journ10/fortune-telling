@@ -34,7 +34,6 @@ export function usePhysicalTossSimulation({
 }: PhysicalTossSimulationParams): CoinPhysicsSnapshot | null {
   const [snapshot, setSnapshot] = useState<CoinPhysicsSnapshot | null>(null);
   const onSettledRef = useRef(onSettled);
-  const settledKeyRef = useRef<PendingTossKey>(null);
 
   useEffect(() => {
     onSettledRef.current = onSettled;
@@ -45,6 +44,7 @@ export function usePhysicalTossSimulation({
     let animationFrame: number | null = null;
     let lastFrameTimestamp: number | null = null;
     let simulation: CoinPhysicsSimulation | null = null;
+    let hasSettled = false;
 
     const cancelLoop = () => {
       if (animationFrame !== null) {
@@ -82,12 +82,8 @@ export function usePhysicalTossSimulation({
       const nextSnapshot = simulation.step(deltaSeconds);
       setSnapshot(nextSnapshot);
 
-      if (
-        nextSnapshot.settled &&
-        nextSnapshot.faces &&
-        settledKeyRef.current !== pendingTossKey
-      ) {
-        settledKeyRef.current = pendingTossKey;
+      if (nextSnapshot.settled && nextSnapshot.faces && !hasSettled) {
+        hasSettled = true;
         onSettledRef.current(nextSnapshot.faces);
         disposeSimulation();
         return;
