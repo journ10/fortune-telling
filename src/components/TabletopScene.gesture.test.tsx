@@ -1,5 +1,4 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, vi } from 'vitest';
 import TabletopScene from './TabletopScene';
 
@@ -12,9 +11,9 @@ afterEach(() => {
 });
 
 describe('TabletopScene gesture trigger', () => {
-  it('keeps the coin interaction surface keyboard-triggerable as the native toss button', async () => {
-    const user = userEvent.setup();
-    const onTossRequest = vi.fn();
+  it('keeps the coin interaction surface keyboard-triggerable as the native toss button', () => {
+    const onTossRelease = vi.fn();
+    const onTossShakeStart = vi.fn();
 
     render(
       <TabletopScene
@@ -22,18 +21,22 @@ describe('TabletopScene gesture trigger', () => {
         pendingTossId={null}
         resultAvailable={false}
         onOpenResult={vi.fn()}
-        onTossRequest={onTossRequest}
+        onTossRelease={onTossRelease}
+        onTossRequest={vi.fn()}
+        onTossShakeStart={onTossShakeStart}
         onTossSettled={vi.fn()}
       />
     );
 
-    const tossButton = screen.getByRole('button', { name: '投掷铜钱' });
+    const tossButton = screen.getByRole('button', { name: '按住颠钱，松开掷出' });
 
     tossButton.focus();
     expect(tossButton).toHaveFocus();
 
-    await user.keyboard('{Enter}');
+    fireEvent.keyDown(tossButton, { key: 'Enter' });
+    fireEvent.keyUp(tossButton, { key: 'Enter' });
 
-    expect(onTossRequest).toHaveBeenCalledTimes(1);
+    expect(onTossShakeStart).toHaveBeenCalledTimes(1);
+    expect(onTossRelease).toHaveBeenCalledTimes(1);
   });
 });

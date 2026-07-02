@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import * as THREE from 'three';
 import { afterEach, beforeEach, vi } from 'vitest';
@@ -17,6 +17,7 @@ interface RenderTabletopSceneOptions {
   currentThrow?: number;
   pendingTossId?: number | null;
   resultAvailable?: boolean;
+  tossInteractionPhase?: 'idle' | 'shaking' | 'released';
   onOpenResult?: () => void;
   onTossRequest?: () => void;
   onTossSettled?: (faces: [CoinFace, CoinFace, CoinFace]) => void;
@@ -26,6 +27,7 @@ function renderTabletopScene({
   currentThrow = 1,
   pendingTossId = null,
   resultAvailable = false,
+  tossInteractionPhase = 'idle',
   onOpenResult = vi.fn(),
   onTossRequest = vi.fn(),
   onTossSettled = vi.fn()
@@ -35,6 +37,7 @@ function renderTabletopScene({
       currentThrow={currentThrow}
       pendingTossId={pendingTossId}
       resultAvailable={resultAvailable}
+      tossInteractionPhase={tossInteractionPhase}
       onOpenResult={onOpenResult}
       onTossRequest={onTossRequest}
       onTossSettled={onTossSettled}
@@ -236,13 +239,12 @@ describe('TabletopScene', () => {
     expect(COIN_TEXTURE_ASSET).toContain('qing-cash-coin-texture.png');
   });
 
-  it('renders the coin interaction without question or AI copy', async () => {
-    const user = userEvent.setup();
+  it('renders the coin interaction without question or AI copy', () => {
     const onTossRequest = vi.fn();
 
     renderTabletopScene({ onTossRequest });
 
-    await user.click(screen.getByRole('button', { name: '投掷铜钱' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: '按住颠钱，松开掷出' }));
 
     expect(onTossRequest).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('开始起卦')).not.toBeInTheDocument();
@@ -253,7 +255,11 @@ describe('TabletopScene', () => {
     vi.useFakeTimers();
     const onTossSettled = vi.fn();
 
-    renderTabletopScene({ pendingTossId: 1, onTossSettled });
+    renderTabletopScene({
+      pendingTossId: 1,
+      tossInteractionPhase: 'released',
+      onTossSettled
+    });
 
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
@@ -266,6 +272,52 @@ describe('TabletopScene', () => {
     });
   });
 
+  it('keeps settled fallback coins on the tabletop until the next manual toss', async () => {
+    vi.useFakeTimers();
+    const onTossSettled = vi.fn();
+    const { rerender } = render(
+      <TabletopScene
+        currentThrow={1}
+        pendingTossId={1}
+        resultAvailable={false}
+        tossInteractionPhase="released"
+        onOpenResult={vi.fn()}
+        onTossRequest={vi.fn()}
+        onTossSettled={onTossSettled}
+      />
+    );
+
+    const pendingFaces = Array.from(document.querySelectorAll('.fallbackCoin')).map((coin) =>
+      coin.getAttribute('data-face')
+    );
+    expect(pendingFaces).toHaveLength(3);
+    pendingFaces.forEach((face) => {
+      expect(['heads', 'tails']).toContain(face);
+    });
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    expect(onTossSettled).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <TabletopScene
+        currentThrow={2}
+        pendingTossId={null}
+        resultAvailable={false}
+        onOpenResult={vi.fn()}
+        onTossRequest={vi.fn()}
+        onTossSettled={onTossSettled}
+      />
+    );
+
+    const settledFaces = Array.from(document.querySelectorAll('.fallbackCoin')).map((coin) =>
+      coin.getAttribute('data-face')
+    );
+    expect(settledFaces).toEqual(pendingFaces);
+  });
+
   it('keeps fallback coins and settles a toss when WebGL renderer setup fails', async () => {
     vi.useFakeTimers();
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
@@ -273,7 +325,13 @@ describe('TabletopScene', () => {
     );
     const onTossSettled = vi.fn();
 
-    expect(() => renderTabletopScene({ pendingTossId: 2, onTossSettled })).not.toThrow();
+    expect(() =>
+      renderTabletopScene({
+        pendingTossId: 2,
+        tossInteractionPhase: 'released',
+        onTossSettled
+      })
+    ).not.toThrow();
 
     expect(document.querySelector('.tabletopCanvas canvas')).not.toBeInTheDocument();
     expect(document.querySelectorAll('.fallbackCoin')).toHaveLength(3);
@@ -297,6 +355,7 @@ describe('TabletopScene', () => {
         currentThrow={2}
         pendingTossId={22}
         resultAvailable={false}
+        tossInteractionPhase="released"
         onOpenResult={vi.fn()}
         onTossRequest={vi.fn()}
         onTossSettled={firstSettled}
@@ -312,6 +371,7 @@ describe('TabletopScene', () => {
         currentThrow={2}
         pendingTossId={22}
         resultAvailable={false}
+        tossInteractionPhase="released"
         onOpenResult={vi.fn()}
         onTossRequest={vi.fn()}
         onTossSettled={secondSettled}
@@ -330,6 +390,7 @@ describe('TabletopScene', () => {
         currentThrow={2}
         pendingTossId={22}
         resultAvailable={false}
+        tossInteractionPhase="released"
         onOpenResult={vi.fn()}
         onTossRequest={vi.fn()}
         onTossSettled={thirdSettled}

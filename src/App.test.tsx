@@ -7,6 +7,7 @@ import * as coinTossModule from './domain/coinToss';
 const SETTLE_DELAY_MS = 1700;
 const SETTLED_HOLD_MS = 520;
 const SETTLE_CALLBACK_DELAY_MS = SETTLE_DELAY_MS + SETTLED_HOLD_MS;
+const READY_TOSS_BUTTON_NAME = '按住颠钱，松开掷出';
 
 async function advanceTossSettlement() {
   await act(async () => {
@@ -58,11 +59,15 @@ async function startCastingWithDefaultQuestion(user: ReturnType<typeof userEvent
 }
 
 async function settleOneToss() {
-  fireEvent.click(screen.getByRole('button', { name: '投掷铜钱' }));
+  const tossButton = screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME });
 
-  expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeDisabled();
+  fireEvent.pointerDown(tossButton);
+  expect(screen.getByRole('button', { name: '颠钱中' })).toBeEnabled();
+  fireEvent.pointerUp(screen.getByRole('button', { name: '颠钱中' }));
+
+  expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
   await advanceTossSettlement();
-  expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME })).toBeEnabled();
 }
 
 async function settleSixTosses() {
@@ -72,9 +77,10 @@ async function settleSixTosses() {
     await settleOneToss();
   }
 
-  fireEvent.click(screen.getByRole('button', { name: '投掷铜钱' }));
+  fireEvent.pointerDown(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME }));
+  fireEvent.pointerUp(screen.getByRole('button', { name: '颠钱中' }));
 
-  expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
   await advanceTossSettlement();
   expect(screen.getByRole('button', { name: '查看结果' })).toBeEnabled();
 
@@ -118,7 +124,7 @@ describe('App', () => {
 
     expect(screen.getByRole('dialog', { name: 'AI 配置' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME })).toBeInTheDocument();
     expect(document.querySelector('.tabletopScene')).toBeInTheDocument();
     expect(document.querySelector('.questionPanel')).not.toBeInTheDocument();
     expect(document.querySelector('.resultPanel')).not.toBeInTheDocument();
@@ -137,7 +143,7 @@ describe('App', () => {
     await startCastingWithDefaultQuestion(user);
 
     expect(screen.queryByRole('dialog', { name: '所问之事' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('第 1 掷 / 共 6 掷');
     expect(screen.queryByText('AI Provider')).not.toBeInTheDocument();
   });
@@ -153,15 +159,44 @@ describe('App', () => {
     await startCastingWithDefaultQuestion(user);
 
     vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('button', { name: '投掷铜钱' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME }));
+    fireEvent.pointerUp(screen.getByRole('button', { name: '颠钱中' }));
 
     expect(tossCoinsSpy).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '投掷落定中' })).toBeDisabled();
 
     await advanceTossSettlement();
 
     expect(tossCoinsSpy).not.toHaveBeenCalled();
     expect(screen.getByRole('status')).toHaveTextContent('第 2 掷 / 共 6 掷');
+  });
+
+  it('generates a fresh cryptographic seed for each tabletop toss request', async () => {
+    const user = userEvent.setup();
+    const seeds = [0x12345678, 0x9abcdef0];
+    const getRandomValues = vi.fn((array: Uint32Array) => {
+      array[0] = seeds.shift() ?? 0;
+      return array;
+    });
+    vi.stubGlobal('crypto', { getRandomValues });
+    vi.stubGlobal('fetch', vi.fn());
+
+    render(<App />);
+
+    await saveAiSettings(user, { apiKey: 'sk-user' });
+    await startCastingWithDefaultQuestion(user);
+
+    vi.useFakeTimers();
+    fireEvent.pointerDown(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME }));
+    fireEvent.pointerUp(screen.getByRole('button', { name: '颠钱中' }));
+    await advanceTossSettlement();
+    fireEvent.pointerDown(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME }));
+
+    expect(getRandomValues).toHaveBeenCalledTimes(2);
+    getRandomValues.mock.calls.forEach(([array]) => {
+      expect(array).toBeInstanceOf(Uint32Array);
+      expect(array).toHaveLength(1);
+    });
   });
 
   it('uses the user provided OpenAI settings for a Chat Completions AI reading', async () => {
@@ -388,7 +423,7 @@ describe('App', () => {
     expect(screen.queryByRole('dialog', { name: 'AI 配置' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'AI 解读' })).not.toBeInTheDocument();
     expect(screen.queryByText('AI 解卦失败：model not found')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME })).toBeInTheDocument();
   });
 
   it('returns to the completed result and retries AI after editing settings from an error', async () => {
@@ -509,6 +544,6 @@ describe('App', () => {
     expect(screen.queryByRole('dialog', { name: 'AI 配置' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'AI 解读' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'AI：可以重起' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '投掷铜钱' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: READY_TOSS_BUTTON_NAME })).toBeInTheDocument();
   });
 });
