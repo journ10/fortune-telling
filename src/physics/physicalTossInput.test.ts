@@ -1,4 +1,6 @@
+import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
+import { coinFaceFromPhysicsRotation } from './coinPhysics';
 import {
   createKeyboardPhysicalTossInput,
   createMotionPhysicalTossInput,
@@ -50,7 +52,7 @@ describe('physical toss input mapping', () => {
   });
 
   it('creates balanced initial face orientations across synthetic pointer inputs', () => {
-    const angularSigns = { positive: 0, negative: 0 };
+    const initialFaces = { heads: 0, tails: 0 };
 
     for (let index = 0; index < 80; index += 1) {
       const input = createPointerPhysicalTossInput({
@@ -66,16 +68,23 @@ describe('physical toss input mapping', () => {
       });
 
       input.coins.forEach((coin) => {
-        if (coin.angularVelocity[0] >= 0) {
-          angularSigns.positive += 1;
+        const rotation = new THREE.Quaternion(
+          coin.rotation[0],
+          coin.rotation[1],
+          coin.rotation[2],
+          coin.rotation[3]
+        ).normalize();
+
+        if (coinFaceFromPhysicsRotation(rotation) === 'heads') {
+          initialFaces.heads += 1;
         } else {
-          angularSigns.negative += 1;
+          initialFaces.tails += 1;
         }
       });
     }
 
-    expect(angularSigns.positive).toBeGreaterThan(40);
-    expect(angularSigns.negative).toBeGreaterThan(40);
+    expect(initialFaces.heads).toBeGreaterThan(40);
+    expect(initialFaces.tails).toBeGreaterThan(40);
   });
 
   it('maps motion summaries into the same physical input contract', () => {
