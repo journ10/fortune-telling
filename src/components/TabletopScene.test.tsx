@@ -173,6 +173,43 @@ describe('TabletopScene', () => {
     });
   });
 
+  it('maps face texture uvs against the mirrored camera-facing plane', () => {
+    const coin = createCoinGroup(0);
+    const face = coin.children.find(
+      (child): child is THREE.Mesh<THREE.ShapeGeometry, THREE.MeshStandardMaterial> =>
+        child instanceof THREE.Mesh &&
+        child.geometry instanceof THREE.ShapeGeometry &&
+        child.material instanceof THREE.MeshStandardMaterial &&
+        child.material.emissiveMap === child.material.map
+    );
+
+    expect(face).toBeDefined();
+
+    const positions = face?.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const uvs = face?.geometry.getAttribute('uv') as THREE.BufferAttribute;
+    let leftmostUv = 0;
+    let rightmostUv = 0;
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+
+    for (let index = 0; index < positions.count; index += 1) {
+      const x = positions.getX(index);
+
+      if (x < minX) {
+        minX = x;
+        leftmostUv = uvs.getX(index);
+      }
+
+      if (x > maxX) {
+        maxX = x;
+        rightmostUv = uvs.getX(index);
+      }
+    }
+
+    expect(leftmostUv).toBeGreaterThan(0.98);
+    expect(rightmostUv).toBeLessThan(0.02);
+  });
+
   it('uses a patinated edge texture instead of a flat side material', () => {
     const coin = createCoinGroup(0);
     const body = coin.children.find(
@@ -190,6 +227,9 @@ describe('TabletopScene', () => {
     expect(edgeMaterial.map).toBeTruthy();
     expect(edgeMaterial.bumpMap).toBe(edgeMaterial.map);
     expect(edgeMaterial.roughness).toBeGreaterThanOrEqual(0.9);
+    expect(edgeMaterial.map?.repeat.x).toBeLessThanOrEqual(1.15);
+    expect(edgeMaterial.userData.patinaPattern).toBe('mottled-edge');
+    expect(edgeMaterial.userData.greenPatina).toBe('subtle-speckles');
   });
 
   it('references a project coin texture sheet asset for WebGL coin faces', () => {

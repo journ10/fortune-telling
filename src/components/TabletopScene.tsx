@@ -452,18 +452,6 @@ function createCoinEdgeTexture(variant: number): THREE.CanvasTexture {
   context.fillStyle = base;
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  for (let x = 0; x < canvas.width; x += 1) {
-    const oxide = Math.sin(x * 0.07 + variant) * 0.5 + Math.sin(x * 0.019) * 0.5;
-
-    if (oxide > 0.44) {
-      context.fillStyle = `rgba(34, 92, 75, ${0.12 + oxide * 0.12})`;
-      context.fillRect(x, 0, 1 + random() * 2, canvas.height);
-    } else if (oxide < -0.62) {
-      context.fillStyle = `rgba(0, 0, 0, ${0.12 + Math.abs(oxide) * 0.08})`;
-      context.fillRect(x, 0, 1 + random() * 3, canvas.height);
-    }
-  }
-
   for (let y = 0; y < canvas.height; y += 1) {
     const ridge = Math.sin(y * 0.62) * 18 + Math.sin(y * 2.6) * 6;
     const alpha = 0.11 + Math.abs(ridge) / 180;
@@ -476,20 +464,39 @@ function createCoinEdgeTexture(variant: number): THREE.CanvasTexture {
   for (let mark = 0; mark < 180; mark += 1) {
     const x = random() * canvas.width;
     const y = random() * canvas.height;
-    const length = 10 + random() * 70;
-    const height = 0.8 + random() * 2.8;
+    const length = 8 + random() * 46;
+    const height = 0.6 + random() * 2;
 
     context.fillStyle =
-      random() > 0.24
-        ? `rgba(${38 + random() * 86}, ${24 + random() * 52}, ${12 + random() * 28}, ${0.2 + random() * 0.28})`
-        : `rgba(${28 + random() * 36}, ${96 + random() * 72}, ${72 + random() * 50}, ${0.24 + random() * 0.34})`;
+      random() > 0.42
+        ? `rgba(${62 + random() * 72}, ${40 + random() * 46}, ${20 + random() * 30}, ${0.16 + random() * 0.22})`
+        : `rgba(0, 0, 0, ${0.08 + random() * 0.18})`;
     context.fillRect(x, y, length, height);
+  }
+
+  for (let patch = 0; patch < 28; patch += 1) {
+    const x = random() * canvas.width;
+    const y = canvas.height * (0.18 + random() * 0.64);
+    const radiusX = 1.2 + random() * 5.8;
+    const radiusY = 0.6 + random() * 2.6;
+
+    context.save();
+    context.translate(x, y);
+    context.rotate((random() - 0.5) * 1.4);
+    context.fillStyle =
+      random() > 0.2
+        ? `rgba(${28 + random() * 24}, ${78 + random() * 42}, ${64 + random() * 34}, ${0.07 + random() * 0.11})`
+        : `rgba(0, 0, 0, ${0.08 + random() * 0.14})`;
+    context.beginPath();
+    context.ellipse(0, 0, radiusX, radiusY, 0, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
   }
 
   const texture = createTextureFromCanvas(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.repeat.set(2.25, 1);
+  texture.repeat.set(1, 1);
   texture.needsUpdate = true;
 
   return texture;
@@ -688,7 +695,7 @@ function createCoinFaceGeometry(): THREE.ShapeGeometry {
     const x = positions.getX(index);
     const y = positions.getY(index);
 
-    uvs.push(x / (COIN_RADIUS * 2) + 0.5, y / (COIN_RADIUS * 2) + 0.5);
+    uvs.push(0.5 - x / (COIN_RADIUS * 2), y / (COIN_RADIUS * 2) + 0.5);
   }
 
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
@@ -842,7 +849,11 @@ export function createCoinGroup(variant: number, coinTexture?: THREE.Texture): T
         color: 0xffffff,
         map: edgeTexture,
         metalness: 0.16,
-        roughness: 0.96
+        roughness: 0.96,
+        userData: {
+          greenPatina: 'subtle-speckles',
+          patinaPattern: 'mottled-edge'
+        }
       })
     ]
   );
