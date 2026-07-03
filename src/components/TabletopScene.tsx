@@ -12,6 +12,7 @@ import {
 import {
   createKeyboardPhysicalTossInput,
   createPointerPhysicalTossInput,
+  type PhysicalCoinInitialState,
   type PhysicalTossInput,
   type PointerTossSample
 } from '../physics/physicalTossInput';
@@ -76,12 +77,15 @@ interface SettledTossVisualState {
   transforms: SettledCoinTransform[];
 }
 
+interface DragPreviewCoinTransform {
+  position: THREE.Vector3;
+  rotation: THREE.Quaternion;
+}
+
 interface DragPreviewState {
   cssX: string;
   cssY: string;
-  sceneX: number;
-  sceneZ: number;
-  tilt: number;
+  coins: [DragPreviewCoinTransform, DragPreviewCoinTransform, DragPreviewCoinTransform];
 }
 
 const visuallyHiddenStyle: CSSProperties = {
@@ -96,6 +100,10 @@ const visuallyHiddenStyle: CSSProperties = {
   whiteSpace: 'nowrap',
   width: '1px'
 };
+
+const VISUAL_FROM_PHYSICS_ROTATION = new THREE.Quaternion().setFromEuler(
+  new THREE.Euler(-Math.PI / 2, 0, 0)
+);
 
 function hasWebGLSupport(): boolean {
   if (typeof document === 'undefined') {
@@ -920,6 +928,7 @@ export default function TabletopScene({
   const settledPhysicsFacesKeyRef = useRef<string | null>(null);
   const dragPreviewRef = useRef<DragPreviewState | null>(null);
   const pointerSamplesRef = useRef<PointerTossSample[]>([]);
+  const pointerPerturbationSeedRef = useRef<number | null>(null);
   const pointerHoldingRef = useRef(false);
   const activePointerIdRef = useRef<number | null>(null);
   const [isWebGlActive, setIsWebGlActive] = useState(false);
@@ -938,6 +947,11 @@ export default function TabletopScene({
 
   useEffect(() => {
     physicsSnapshotRef.current = physicsSnapshot;
+
+    if (physicsSnapshot?.coins.length && dragPreviewRef.current) {
+      dragPreviewRef.current = null;
+      setDragPreview(null);
+    }
 
     if (!physicsSnapshot?.faces) {
       return;
@@ -1142,21 +1156,11 @@ export default function TabletopScene({
 
             coin.position.copy(simulatedCoin.position);
             coin.rotation.setFromQuaternion(simulatedCoin.visualRotation);
-          } else if (dragPreview) {
-            const slot = index - 1;
-            const spread = 0.62;
-            const hover = 1.12 + index * 0.035;
+          } else if (dragPreview?.coins[index]) {
+            const previewCoin = dragPreview.coins[index];
 
-            coin.position.set(
-              dragPreview.sceneX + slot * spread,
-              hover,
-              dragPreview.sceneZ + slot * 0.08
-            );
-            coin.rotation.set(
-              -Math.PI / 2 + dragPreview.tilt + slot * 0.05,
-              slot * 0.16,
-              slot * 0.22
-            );
+            coin.position.copy(previewCoin.position);
+            coin.rotation.setFromQuaternion(previewCoin.rotation);
           } else if (tossProgress !== null) {
             const descentProgress = clamp(tossProgress / 0.72);
             const impactProgress = clamp((tossProgress - 0.72) / 0.28);
@@ -1227,6 +1231,11 @@ export default function TabletopScene({
 
   useEffect(() => {
     if (!pendingTossKey) {
+      if (!pointerHoldingRef.current && dragPreviewRef.current) {
+        dragPreviewRef.current = null;
+        setDragPreview(null);
+      }
+
       if (currentThrow === 1 && !resultAvailable) {
         settledVisualStateRef.current = null;
         setSettledFallbackFaces(null);
@@ -1259,34 +1268,54 @@ export default function TabletopScene({
     };
   }
 
-  function createDragPreview(
+  function visualRotationFromInputRotation(
+    rotation: PhysicalCoinInitialState['rotation']
+  ): THREE.Quaternion {
+    return new THREE.Quaternion(rotation[0], rotation[1], rotation[2], rotation[3])
+      .normalize()
+      .multiply(VISUAL_FROM_PHYSICS_ROTATION);
+  }
+
+  function createDragPreviewFromInput(
+    input: PhysicalTossInput,
     sample: PointerTossSample,
     sceneWidth: number,
     sceneHeight: number
   ): DragPreviewState {
     const normalizedX = clamp(sample.x / Math.max(sceneWidth, 1), 0, 1);
     const normalizedY = clamp(sample.y / Math.max(sceneHeight, 1), 0, 1);
-    const sceneX = (normalizedX - 0.5) * 4.8;
-    const sceneZ = (normalizedY - 0.5) * 3.1;
 
     return {
       cssX: `${(normalizedX - 0.5) * 58}%`,
       cssY: `${(normalizedY - 0.5) * 42}%`,
-      sceneX,
-      sceneZ,
-      tilt: (normalizedY - 0.5) * 0.32
+      coins: input.coins.map((coin) => ({
+        position: new THREE.Vector3(...coin.position),
+        rotation: visualRotationFromInputRotation(coin.rotation)
+      })) as [DragPreviewCoinTransform, DragPreviewCoinTransform, DragPreviewCoinTransform]
     };
   }
 
   function updateDragPreview(
-    sample: PointerTossSample,
+    samples: readonly PointerTossSample[],
     target: HTMLButtonElement
   ) {
-    const preview = createDragPreview(
-      sample,
-      target.clientWidth || SCENE_WIDTH,
-      target.clientHeight || SCENE_HEIGHT
-    );
+    const sceneWidth = target.clientWidth || SCENE_WIDTH;
+    const sceneHeight = target.clientHeight || SCENE_HEIGHT;
+    const sample = samples[samples.length - 1] ?? {
+      x: sceneWidth / 2,
+      y: sceneHeight / 2,
+      timestamp: getTime()
+    };
+    const perturbationSeed =
+      pointerPerturbationSeedRef.current ?? createPerturbationSeed(samples.length);
+    const input = createPointerPhysicalTossInput({
+      currentThrow,
+      samples: samples.length > 0 ? samples : [sample],
+      sceneWidth,
+      sceneHeight,
+      perturbationSeed
+    });
+    const preview = createDragPreviewFromInput(input, sample, sceneWidth, sceneHeight);
 
     dragPreviewRef.current = preview;
     setDragPreview(preview);
@@ -1303,12 +1332,16 @@ export default function TabletopScene({
     return (Date.now() ^ seedMix) >>> 0;
   }
 
-  function clearPointerHold() {
+  function clearPointerHold({ clearPreview = true }: { clearPreview?: boolean } = {}) {
     pointerSamplesRef.current = [];
+    pointerPerturbationSeedRef.current = null;
     pointerHoldingRef.current = false;
     activePointerIdRef.current = null;
-    dragPreviewRef.current = null;
-    setDragPreview(null);
+
+    if (clearPreview) {
+      dragPreviewRef.current = null;
+      setDragPreview(null);
+    }
   }
 
   function readPointerId(event: React.PointerEvent<HTMLButtonElement>): number {
@@ -1337,17 +1370,24 @@ export default function TabletopScene({
 
   const requestPointerToss = (event: React.PointerEvent<HTMLButtonElement>) => {
     const samples = [...pointerSamplesRef.current, readPointerSample(event)].slice(-8);
-    clearPointerHold();
+    const sceneWidth = event.currentTarget.clientWidth || SCENE_WIDTH;
+    const sceneHeight = event.currentTarget.clientHeight || SCENE_HEIGHT;
+    const sample = samples[samples.length - 1];
+    const perturbationSeed =
+      pointerPerturbationSeedRef.current ?? createPerturbationSeed(samples.length);
+    const input = createPointerPhysicalTossInput({
+      currentThrow,
+      samples,
+      sceneWidth,
+      sceneHeight,
+      perturbationSeed
+    });
 
-    onPhysicalTossRequest(
-      createPointerPhysicalTossInput({
-        currentThrow,
-        samples,
-        sceneWidth: event.currentTarget.clientWidth || SCENE_WIDTH,
-        sceneHeight: event.currentTarget.clientHeight || SCENE_HEIGHT,
-        perturbationSeed: createPerturbationSeed(samples.length)
-      })
-    );
+    dragPreviewRef.current = createDragPreviewFromInput(input, sample, sceneWidth, sceneHeight);
+    setDragPreview(null);
+    clearPointerHold({ clearPreview: false });
+
+    onPhysicalTossRequest(input);
   };
 
   const requestKeyboardToss = () => {
@@ -1406,7 +1446,9 @@ export default function TabletopScene({
         className="coinInteractionSurface"
         disabled={pendingToss !== null}
         onBlur={() => {
-          clearPointerHold();
+          if (pointerHoldingRef.current) {
+            clearPointerHold();
+          }
         }}
         onKeyDown={(event) => {
           if (resultAvailable || pendingToss) {
@@ -1450,8 +1492,9 @@ export default function TabletopScene({
           event.currentTarget.setPointerCapture?.(pointerId);
           pointerHoldingRef.current = true;
           activePointerIdRef.current = pointerId;
+          pointerPerturbationSeedRef.current = createPerturbationSeed(currentThrow ^ pointerId);
           pointerSamplesRef.current = [sample];
-          updateDragPreview(sample, event.currentTarget);
+          updateDragPreview(pointerSamplesRef.current, event.currentTarget);
         }}
         onPointerMove={(event) => {
           if (!pointerHoldingRef.current || pendingToss || !isActivePointer(event)) {
@@ -1461,7 +1504,7 @@ export default function TabletopScene({
           const sample = readPointerSample(event);
 
           pointerSamplesRef.current = [...pointerSamplesRef.current, sample].slice(-8);
-          updateDragPreview(sample, event.currentTarget);
+          updateDragPreview(pointerSamplesRef.current, event.currentTarget);
         }}
         onClick={() => {
           if (resultAvailable) {

@@ -51,6 +51,36 @@ describe('physical toss input mapping', () => {
     });
   });
 
+  it('anchors pointer coin starts at the release location', () => {
+    const leftTop = createPointerPhysicalTossInput({
+      currentThrow: 3,
+      samples: [
+        { x: 60, y: 80, timestamp: 0 },
+        { x: 100, y: 100, timestamp: 100 },
+        { x: 140, y: 120, timestamp: 200 }
+      ],
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0xabcdef12
+    });
+    const rightBottom = createPointerPhysicalTossInput({
+      currentThrow: 3,
+      samples: [
+        { x: 560, y: 360, timestamp: 0 },
+        { x: 600, y: 380, timestamp: 100 },
+        { x: 640, y: 400, timestamp: 200 }
+      ],
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0xabcdef12
+    });
+    const averagePosition = (axis: 0 | 2, input: typeof leftTop) =>
+      input.coins.reduce((total, coin) => total + coin.position[axis], 0) / input.coins.length;
+
+    expect(averagePosition(0, rightBottom) - averagePosition(0, leftTop)).toBeGreaterThan(3);
+    expect(averagePosition(2, rightBottom) - averagePosition(2, leftTop)).toBeGreaterThan(1.5);
+  });
+
   it('creates balanced initial face orientations across synthetic pointer inputs', () => {
     const initialFaces = { heads: 0, tails: 0 };
 

@@ -52,6 +52,9 @@ export interface KeyboardTossInputParams {
 const MIN_POINTER_ENERGY = 0.32;
 const MIN_KEYBOARD_ENERGY = 0.38;
 const MAX_ENERGY = 1.45;
+const POINTER_SCENE_X_RANGE = 4.8;
+const POINTER_SCENE_Z_RANGE = 3.1;
+const DEFAULT_COIN_ORIGIN: Vec3Tuple = [0, 0, -0.16];
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(Number.isFinite(value) ? value : min, min), max);
@@ -146,6 +149,23 @@ function ensureMinimumAngularVelocity(vector: Vec3Tuple): Vec3Tuple {
   ];
 }
 
+function pointerSampleToSceneOrigin(
+  sample: PointerTossSample | undefined,
+  sceneWidth: number,
+  sceneHeight: number
+): Vec3Tuple {
+  const safeWidth = Math.max(sceneWidth, 1);
+  const safeHeight = Math.max(sceneHeight, 1);
+  const normalizedX = clamp((sample?.x ?? safeWidth / 2) / safeWidth, 0, 1);
+  const normalizedY = clamp((sample?.y ?? safeHeight / 2) / safeHeight, 0, 1);
+
+  return [
+    (normalizedX - 0.5) * POINTER_SCENE_X_RANGE,
+    0,
+    (normalizedY - 0.5) * POINTER_SCENE_Z_RANGE
+  ];
+}
+
 function createCoinStates(
   source: PhysicalTossSource,
   currentThrow: number,
@@ -154,7 +174,8 @@ function createCoinStates(
   direction: Vec3Tuple,
   spinBias: Vec3Tuple,
   perturbationSeed: number,
-  perturbationScale: number
+  perturbationScale: number,
+  origin: Vec3Tuple = DEFAULT_COIN_ORIGIN
 ): [PhysicalCoinInitialState, PhysicalCoinInitialState, PhysicalCoinInitialState] {
   const random = createSeededRandom(
     perturbationSeed ^
@@ -181,9 +202,9 @@ function createCoinStates(
 
     return {
       position: [
-        slot * spread + jitter(),
+        origin[0] + slot * spread + jitter(),
         verticalLift + entry * 0.035 + jitter() * 0.4,
-        -0.16 + slot * 0.04 + jitter()
+        origin[2] + slot * 0.04 + jitter()
       ],
       rotation,
       linearVelocity: [
@@ -212,6 +233,7 @@ export function createPointerPhysicalTossInput(params: PointerTossInputParams): 
   const direction = normalizeVector([pathX, 0, pathY], [velocityX, 0, velocityY || -1]);
   const spinBias: Vec3Tuple = [velocityY * 850, velocityX * 560, (velocityX - velocityY) * 420];
   const perturbationScale = clamp(0.035 + speed * 0.018, 0.035, 0.09);
+  const origin = pointerSampleToSceneOrigin(last, params.sceneWidth, params.sceneHeight);
 
   return {
     source: 'pointer',
@@ -224,7 +246,8 @@ export function createPointerPhysicalTossInput(params: PointerTossInputParams): 
       direction,
       spinBias,
       params.perturbationSeed,
-      perturbationScale
+      perturbationScale,
+      origin
     ),
     energy,
     durationMs,
