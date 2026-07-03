@@ -295,6 +295,48 @@ describe('TabletopScene', () => {
     expect(onPhysicalTossRequest.mock.calls[0][0].coins).toHaveLength(3);
   });
 
+  it('shows drag feedback while the pointer is held', () => {
+    const onPhysicalTossRequest = vi.fn();
+
+    renderTabletopScene({ onPhysicalTossRequest });
+
+    const scene = document.querySelector('.tabletopScene') as HTMLElement;
+    const button = screen.getByRole('button', { name: '拖动铜钱，松手掷出' });
+
+    expect(scene).toHaveAttribute('data-dragging', 'false');
+
+    fireEvent.pointerDown(button, {
+      button: 0,
+      clientX: 210,
+      clientY: 250,
+      isPrimary: true,
+      pointerId: 1,
+      pointerType: 'mouse'
+    });
+    fireEvent.pointerMove(button, {
+      clientX: 300,
+      clientY: 210,
+      isPrimary: true,
+      pointerId: 1,
+      pointerType: 'mouse'
+    });
+
+    expect(scene).toHaveAttribute('data-dragging', 'true');
+    expect(scene.style.getPropertyValue('--drag-preview-x')).not.toBe('');
+    expect(scene.style.getPropertyValue('--drag-preview-y')).not.toBe('');
+
+    fireEvent.pointerUp(button, {
+      clientX: 360,
+      clientY: 170,
+      isPrimary: true,
+      pointerId: 1,
+      pointerType: 'mouse'
+    });
+
+    expect(scene).toHaveAttribute('data-dragging', 'false');
+    expect(onPhysicalTossRequest).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores secondary mouse pointer toss attempts', () => {
     const onPhysicalTossRequest = vi.fn();
 

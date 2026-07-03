@@ -76,6 +76,14 @@ interface SettledTossVisualState {
   transforms: SettledCoinTransform[];
 }
 
+interface DragPreviewState {
+  cssX: string;
+  cssY: string;
+  sceneX: number;
+  sceneZ: number;
+  tilt: number;
+}
+
 const visuallyHiddenStyle: CSSProperties = {
   border: 0,
   clip: 'rect(0 0 0 0)',
@@ -910,10 +918,12 @@ export default function TabletopScene({
   const physicsSnapshotRef = useRef<CoinPhysicsSnapshot | null>(null);
   const settledVisualStateRef = useRef<SettledTossVisualState | null>(null);
   const settledPhysicsFacesKeyRef = useRef<string | null>(null);
+  const dragPreviewRef = useRef<DragPreviewState | null>(null);
   const pointerSamplesRef = useRef<PointerTossSample[]>([]);
   const pointerHoldingRef = useRef(false);
   const activePointerIdRef = useRef<number | null>(null);
   const [isWebGlActive, setIsWebGlActive] = useState(false);
+  const [dragPreview, setDragPreview] = useState<DragPreviewState | null>(null);
   const [settledFallbackFaces, setSettledFallbackFaces] = useState<
     [CoinFace, CoinFace, CoinFace] | null
   >(null);
@@ -1122,6 +1132,7 @@ export default function TabletopScene({
             ? null
             : clamp((getTime() - tossStartedAt) / FALLBACK_ANIMATION_DURATION_MS);
         const physicsSnapshot = physicsSnapshotRef.current;
+        const dragPreview = dragPreviewRef.current;
 
         coinGroups.forEach((coin, index) => {
           const plan = coinPlansRef.current[index];
@@ -1131,6 +1142,21 @@ export default function TabletopScene({
 
             coin.position.copy(simulatedCoin.position);
             coin.rotation.setFromQuaternion(simulatedCoin.visualRotation);
+          } else if (dragPreview) {
+            const slot = index - 1;
+            const spread = 0.62;
+            const hover = 1.12 + index * 0.035;
+
+            coin.position.set(
+              dragPreview.sceneX + slot * spread,
+              hover,
+              dragPreview.sceneZ + slot * 0.08
+            );
+            coin.rotation.set(
+              -Math.PI / 2 + dragPreview.tilt + slot * 0.05,
+              slot * 0.16,
+              slot * 0.22
+            );
           } else if (tossProgress !== null) {
             const descentProgress = clamp(tossProgress / 0.72);
             const impactProgress = clamp((tossProgress - 0.72) / 0.28);
@@ -1233,6 +1259,39 @@ export default function TabletopScene({
     };
   }
 
+  function createDragPreview(
+    sample: PointerTossSample,
+    sceneWidth: number,
+    sceneHeight: number
+  ): DragPreviewState {
+    const normalizedX = clamp(sample.x / Math.max(sceneWidth, 1), 0, 1);
+    const normalizedY = clamp(sample.y / Math.max(sceneHeight, 1), 0, 1);
+    const sceneX = (normalizedX - 0.5) * 4.8;
+    const sceneZ = (normalizedY - 0.5) * 3.1;
+
+    return {
+      cssX: `${(normalizedX - 0.5) * 58}%`,
+      cssY: `${(normalizedY - 0.5) * 42}%`,
+      sceneX,
+      sceneZ,
+      tilt: (normalizedY - 0.5) * 0.32
+    };
+  }
+
+  function updateDragPreview(
+    sample: PointerTossSample,
+    target: HTMLButtonElement
+  ) {
+    const preview = createDragPreview(
+      sample,
+      target.clientWidth || SCENE_WIDTH,
+      target.clientHeight || SCENE_HEIGHT
+    );
+
+    dragPreviewRef.current = preview;
+    setDragPreview(preview);
+  }
+
   function createPerturbationSeed(seedMix: number): number {
     const values = new Uint32Array(1);
 
@@ -1248,6 +1307,8 @@ export default function TabletopScene({
     pointerSamplesRef.current = [];
     pointerHoldingRef.current = false;
     activePointerIdRef.current = null;
+    dragPreviewRef.current = null;
+    setDragPreview(null);
   }
 
   function readPointerId(event: React.PointerEvent<HTMLButtonElement>): number {
@@ -1304,11 +1365,19 @@ export default function TabletopScene({
     : pendingToss
       ? '投掷落定中'
       : '拖动铜钱，松手掷出';
+  const tabletopStyle = dragPreview
+    ? ({
+        '--drag-preview-x': dragPreview.cssX,
+        '--drag-preview-y': dragPreview.cssY
+      } as CSSProperties)
+    : undefined;
 
   return (
     <section
       className="tabletopScene"
+      data-dragging={dragPreview ? 'true' : 'false'}
       data-webgl-active={isWebGlActive ? 'true' : 'false'}
+      style={tabletopStyle}
       aria-label="铜钱桌面"
     >
       <div ref={mountRef} className="tabletopCanvas" aria-hidden="true" />
@@ -1376,21 +1445,23 @@ export default function TabletopScene({
           }
 
           const pointerId = readPointerId(event);
+          const sample = readPointerSample(event);
 
           event.currentTarget.setPointerCapture?.(pointerId);
           pointerHoldingRef.current = true;
           activePointerIdRef.current = pointerId;
-          pointerSamplesRef.current = [readPointerSample(event)];
+          pointerSamplesRef.current = [sample];
+          updateDragPreview(sample, event.currentTarget);
         }}
         onPointerMove={(event) => {
           if (!pointerHoldingRef.current || pendingToss || !isActivePointer(event)) {
             return;
           }
 
-          pointerSamplesRef.current = [
-            ...pointerSamplesRef.current,
-            readPointerSample(event)
-          ].slice(-8);
+          const sample = readPointerSample(event);
+
+          pointerSamplesRef.current = [...pointerSamplesRef.current, sample].slice(-8);
+          updateDragPreview(sample, event.currentTarget);
         }}
         onClick={() => {
           if (resultAvailable) {
