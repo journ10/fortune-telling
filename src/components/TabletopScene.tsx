@@ -36,6 +36,7 @@ const FALLBACK_FACES: [CoinFace, CoinFace, CoinFace] = ['heads', 'tails', 'heads
 const FALLBACK_ANIMATION_DURATION_MS = 1700;
 const SCENE_WIDTH = 720;
 const SCENE_HEIGHT = 480;
+const POINTER_SAMPLE_HISTORY_LIMIT = 64;
 export { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS };
 const COIN_RADIUS = TABLETOP_COIN_RADIUS;
 const COIN_THICKNESS = TABLETOP_COIN_THICKNESS;
@@ -1369,7 +1370,9 @@ export default function TabletopScene({
   }
 
   const requestPointerToss = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const samples = [...pointerSamplesRef.current, readPointerSample(event)].slice(-8);
+    const samples = [...pointerSamplesRef.current, readPointerSample(event)].slice(
+      -POINTER_SAMPLE_HISTORY_LIMIT
+    );
     const sceneWidth = event.currentTarget.clientWidth || SCENE_WIDTH;
     const sceneHeight = event.currentTarget.clientHeight || SCENE_HEIGHT;
     const sample = samples[samples.length - 1];
@@ -1503,7 +1506,9 @@ export default function TabletopScene({
 
           const sample = readPointerSample(event);
 
-          pointerSamplesRef.current = [...pointerSamplesRef.current, sample].slice(-8);
+          pointerSamplesRef.current = [...pointerSamplesRef.current, sample].slice(
+            -POINTER_SAMPLE_HISTORY_LIMIT
+          );
           updateDragPreview(pointerSamplesRef.current, event.currentTarget);
         }}
         onClick={() => {

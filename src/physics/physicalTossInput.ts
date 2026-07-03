@@ -54,7 +54,15 @@ const MIN_KEYBOARD_ENERGY = 0.38;
 const MAX_ENERGY = 1.45;
 const POINTER_SCENE_X_RANGE = 4.8;
 const POINTER_SCENE_Z_RANGE = 3.1;
+const POINTER_TRAJECTORY_SAMPLE_LIMIT = 64;
 const DEFAULT_COIN_ORIGIN: Vec3Tuple = [0, 0, -0.16];
+
+interface PointerTrajectoryProfile {
+  digest: number;
+  totalDistance: number;
+  turnEnergy: number;
+  accelerationEnergy: number;
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(Number.isFinite(value) ? value : min, min), max);
@@ -67,6 +75,18 @@ function createSeededRandom(seed: number): () => number {
     value = (Math.imul(value, 1664525) + 1013904223) >>> 0;
     return value / 4294967296;
   };
+}
+
+function mixDigest(seed: number, value: number): number {
+  let mixed = (seed ^ (value >>> 0)) >>> 0;
+
+  mixed = Math.imul(mixed ^ (mixed >>> 16), 0x85ebca6b) >>> 0;
+  mixed = Math.imul(mixed ^ (mixed >>> 13), 0xc2b2ae35) >>> 0;
+  return (mixed ^ (mixed >>> 16)) >>> 0;
+}
+
+function quantize(value: number, scale: number): number {
+  return Math.round((Number.isFinite(value) ? value : 0) * scale);
 }
 
 function normalizeVector(vector: Vec3Tuple, fallback: Vec3Tuple): Vec3Tuple {
@@ -166,6 +186,70 @@ function pointerSampleToSceneOrigin(
   ];
 }
 
+function createPointerTrajectoryProfile(
+  samples: readonly PointerTossSample[],
+  sceneWidth: number,
+  sceneHeight: number
+): PointerTrajectoryProfile {
+  const safeWidth = Math.max(sceneWidth, 1);
+  const safeHeight = Math.max(sceneHeight, 1);
+  let digest = 0x811c9dc5;
+  let totalDistance = 0;
+  let turnEnergy = 0;
+  let accelerationEnergy = 0;
+  let previousVelocityX = 0;
+  let previousVelocityY = 0;
+  let previousSpeed = 0;
+  let hasPreviousVelocity = false;
+
+  samples.forEach((sample, index) => {
+    digest = mixDigest(digest, quantize(sample.x / safeWidth, 100000));
+    digest = mixDigest(digest, quantize(sample.y / safeHeight, 100000));
+    digest = mixDigest(digest, quantize(sample.timestamp, 10));
+
+    if (index === 0) {
+      return;
+    }
+
+    const previous = samples[index - 1];
+    const deltaMs = Math.max(1, sample.timestamp - previous.timestamp);
+    const deltaX = (sample.x - previous.x) / safeWidth;
+    const deltaY = (sample.y - previous.y) / safeHeight;
+    const distance = Math.hypot(deltaX, deltaY);
+    const velocityX = deltaX / deltaMs;
+    const velocityY = deltaY / deltaMs;
+    const speed = Math.hypot(velocityX, velocityY);
+
+    totalDistance += distance;
+    digest = mixDigest(digest, quantize(deltaX, 100000));
+    digest = mixDigest(digest, quantize(deltaY, 100000));
+    digest = mixDigest(digest, quantize(deltaMs, 10));
+
+    if (hasPreviousVelocity) {
+      const cross = previousVelocityX * velocityY - previousVelocityY * velocityX;
+      const dot = previousVelocityX * velocityX + previousVelocityY * velocityY;
+      const turn = Math.abs(Math.atan2(cross, dot));
+
+      turnEnergy += turn * Math.min(speed * 1000, 4);
+      accelerationEnergy += Math.abs(speed - previousSpeed) * 1000;
+      digest = mixDigest(digest, quantize(turn, 10000));
+      digest = mixDigest(digest, quantize(speed - previousSpeed, 1000000));
+    }
+
+    previousVelocityX = velocityX;
+    previousVelocityY = velocityY;
+    previousSpeed = speed;
+    hasPreviousVelocity = true;
+  });
+
+  return {
+    digest,
+    totalDistance,
+    turnEnergy,
+    accelerationEnergy
+  };
+}
+
 function createCoinStates(
   source: PhysicalTossSource,
   currentThrow: number,
@@ -188,7 +272,8 @@ function createCoinStates(
     const slot = entry - 1;
     const jitter = () => (random() - 0.5) * perturbationScale;
     const verticalLift = 0.72 + energy * 0.52 + random() * 0.08;
-    const spread = 0.24 + energy * 0.12;
+    const spread = source === 'pointer' ? 1.12 + energy * 0.08 : 0.24 + energy * 0.12;
+    const positionJitterScale = source === 'pointer' ? 0.35 : 1;
     const rawAngularVelocityX =
       spinBias[0] * (0.018 + energy * 0.012) + slot * (2.2 + energy) + jitter() * 6;
     const pointerAngularVelocityX =
@@ -202,9 +287,9 @@ function createCoinStates(
 
     return {
       position: [
-        origin[0] + slot * spread + jitter(),
+        origin[0] + slot * spread + jitter() * positionJitterScale,
         verticalLift + entry * 0.035 + jitter() * 0.4,
-        origin[2] + slot * 0.04 + jitter()
+        origin[2] + slot * 0.04 + jitter() * positionJitterScale
       ],
       rotation,
       linearVelocity: [
@@ -218,10 +303,16 @@ function createCoinStates(
 }
 
 export function createPointerPhysicalTossInput(params: PointerTossInputParams): PhysicalTossInput {
-  const samples = params.samples.slice(-6);
+  const trajectorySamples = params.samples.slice(-POINTER_TRAJECTORY_SAMPLE_LIMIT);
+  const samples = trajectorySamples.slice(-6);
   const first = samples[0];
   const last = samples[samples.length - 1] ?? first;
   const previous = samples[Math.max(0, samples.length - 2)] ?? first;
+  const trajectoryProfile = createPointerTrajectoryProfile(
+    trajectorySamples,
+    params.sceneWidth,
+    params.sceneHeight
+  );
   const durationMs = Math.max(1, (last?.timestamp ?? 0) - (first?.timestamp ?? 0));
   const deltaMs = Math.max(1, (last?.timestamp ?? 0) - (previous?.timestamp ?? 0));
   const velocityX = ((last?.x ?? 0) - (previous?.x ?? 0)) / deltaMs;
@@ -229,11 +320,28 @@ export function createPointerPhysicalTossInput(params: PointerTossInputParams): 
   const pathX = ((last?.x ?? 0) - (first?.x ?? 0)) / Math.max(params.sceneWidth, 1);
   const pathY = ((last?.y ?? 0) - (first?.y ?? 0)) / Math.max(params.sceneHeight, 1);
   const speed = Math.hypot(velocityX, velocityY);
-  const energy = clamp(speed * 0.72 + durationMs / 1800, MIN_POINTER_ENERGY, MAX_ENERGY);
+  const shakeEnergy =
+    trajectoryProfile.totalDistance * 0.34 +
+    trajectoryProfile.turnEnergy * 0.014 +
+    trajectoryProfile.accelerationEnergy * 0.026;
+  const energy = clamp(
+    speed * 0.72 + durationMs / 1800 + shakeEnergy,
+    MIN_POINTER_ENERGY,
+    MAX_ENERGY
+  );
   const direction = normalizeVector([pathX, 0, pathY], [velocityX, 0, velocityY || -1]);
-  const spinBias: Vec3Tuple = [velocityY * 850, velocityX * 560, (velocityX - velocityY) * 420];
-  const perturbationScale = clamp(0.035 + speed * 0.018, 0.035, 0.09);
+  const spinBias: Vec3Tuple = [
+    velocityY * 850 + trajectoryProfile.turnEnergy * 48,
+    velocityX * 560 + trajectoryProfile.accelerationEnergy * 32,
+    (velocityX - velocityY) * 420 + trajectoryProfile.totalDistance * 120
+  ];
+  const perturbationScale = clamp(
+    0.035 + speed * 0.018 + shakeEnergy * 0.012,
+    0.035,
+    0.09
+  );
   const origin = pointerSampleToSceneOrigin(last, params.sceneWidth, params.sceneHeight);
+  const perturbationSeed = (params.perturbationSeed ^ trajectoryProfile.digest) >>> 0;
 
   return {
     source: 'pointer',
@@ -245,13 +353,13 @@ export function createPointerPhysicalTossInput(params: PointerTossInputParams): 
       durationMs,
       direction,
       spinBias,
-      params.perturbationSeed,
+      perturbationSeed,
       perturbationScale,
       origin
     ),
     energy,
     durationMs,
-    perturbationSeed: params.perturbationSeed >>> 0,
+    perturbationSeed,
     perturbationScale
   };
 }

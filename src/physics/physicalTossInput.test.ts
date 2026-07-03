@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
+import { TABLETOP_COIN_RADIUS } from './coinGeometry';
 import { coinFaceFromPhysicsRotation } from './coinPhysics';
 import {
   createKeyboardPhysicalTossInput,
@@ -79,6 +80,64 @@ describe('physical toss input mapping', () => {
 
     expect(averagePosition(0, rightBottom) - averagePosition(0, leftTop)).toBeGreaterThan(3);
     expect(averagePosition(2, rightBottom) - averagePosition(2, leftTop)).toBeGreaterThan(1.5);
+  });
+
+  it('uses pointer shake trajectory to perturb initial coin rotations', () => {
+    const calmArc = createPointerPhysicalTossInput({
+      currentThrow: 4,
+      samples: [
+        { x: 220, y: 240, timestamp: 0 },
+        { x: 300, y: 220, timestamp: 90 },
+        { x: 380, y: 200, timestamp: 180 },
+        { x: 460, y: 180, timestamp: 270 }
+      ],
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0x33445566
+    });
+    const shakenArc = createPointerPhysicalTossInput({
+      currentThrow: 4,
+      samples: [
+        { x: 220, y: 240, timestamp: 0 },
+        { x: 315, y: 150, timestamp: 70 },
+        { x: 260, y: 300, timestamp: 125 },
+        { x: 410, y: 120, timestamp: 190 },
+        { x: 360, y: 265, timestamp: 235 },
+        { x: 460, y: 180, timestamp: 270 }
+      ],
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0x33445566
+    });
+    const roundedRotations = (input: typeof calmArc) =>
+      input.coins.map((coin) => coin.rotation.map((value) => value.toFixed(6)).join(','));
+
+    expect(roundedRotations(shakenArc)).not.toEqual(roundedRotations(calmArc));
+  });
+
+  it('keeps pointer coin starts separated enough to avoid initial interpenetration', () => {
+    const input = createPointerPhysicalTossInput({
+      currentThrow: 2,
+      samples: [
+        { x: 280, y: 260, timestamp: 0 },
+        { x: 330, y: 220, timestamp: 90 },
+        { x: 420, y: 210, timestamp: 180 }
+      ],
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0x10293847
+    });
+
+    input.coins.forEach((coin, index) => {
+      input.coins.slice(index + 1).forEach((otherCoin) => {
+        const planarDistance = Math.hypot(
+          coin.position[0] - otherCoin.position[0],
+          coin.position[2] - otherCoin.position[2]
+        );
+
+        expect(planarDistance).toBeGreaterThan(TABLETOP_COIN_RADIUS * 2.05);
+      });
+    });
   });
 
   it('creates balanced initial face orientations across synthetic pointer inputs', () => {
