@@ -380,6 +380,35 @@ describe('coinPhysics', () => {
     simulation.dispose();
   });
 
+  it('keeps energetic pointer tosses inside the tabletop air box', async () => {
+    await initCoinPhysics();
+    const input = createPointerPhysicalTossInput({
+      currentThrow: 3,
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0x8a1f3c22,
+      samples: [
+        { x: 500, y: 260, timestamp: 0 },
+        { x: 570, y: 245, timestamp: 45 },
+        { x: 640, y: 232, timestamp: 90 },
+        { x: 700, y: 220, timestamp: 135 }
+      ]
+    });
+    const simulation = createCoinPhysicsSimulation(input);
+    let snapshot = simulation.snapshot();
+
+    for (let step = 0; step < 240; step += 1) {
+      snapshot = simulation.step(1 / 60);
+
+      snapshot.coins.forEach((coin) => {
+        expect(Math.abs(coin.position.x)).toBeLessThanOrEqual(6.25);
+        expect(Math.abs(coin.position.z)).toBeLessThanOrEqual(4.25);
+      });
+    }
+
+    simulation.dispose();
+  });
+
   it('keeps legacy chamber compatibility from settling before release', async () => {
     await initCoinPhysics();
     const simulation = createCoinPhysicsSimulation(1, 7, 0x12345678, {

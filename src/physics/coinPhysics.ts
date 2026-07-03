@@ -28,6 +28,11 @@ const TABLETOP_COLLIDER_FLOOR_CLEARANCE = 0.004;
 const TABLETOP_COLLIDER_MAX_PENETRATION = 0.018;
 const TABLETOP_CORRECTION_LINEAR_DAMPING = 0.94;
 const TABLETOP_CORRECTION_ANGULAR_DAMPING = 0.985;
+const TABLETOP_AIR_BOX_HALF_X = 6.2;
+const TABLETOP_AIR_BOX_HALF_Z = 4.2;
+const TABLETOP_AIR_BOX_HALF_Y = 1.65;
+const TABLETOP_AIR_BOX_CENTER_Y = 1.62;
+const TABLETOP_AIR_BOX_WALL_THICKNESS = 0.08;
 export const COIN_PHYSICS_COLLIDER_SKIN = 0.012;
 export const COIN_PHYSICS_COLLIDER_RADIUS = TABLETOP_COIN_RADIUS + COIN_PHYSICS_COLLIDER_SKIN;
 export const COIN_PHYSICS_COLLIDER_HALF_HEIGHT =
@@ -341,6 +346,59 @@ function applyMicroPerturbations(
   });
 }
 
+function createTabletopAirBox(world: RAPIER.World): void {
+  const wallFriction = 0.84;
+  const wallRestitution = 0.18;
+  const wall = (collider: RAPIER.ColliderDesc) => {
+    world.createCollider(collider.setFriction(wallFriction).setRestitution(wallRestitution));
+  };
+
+  wall(
+    RAPIER.ColliderDesc.cuboid(
+      TABLETOP_AIR_BOX_WALL_THICKNESS,
+      TABLETOP_AIR_BOX_HALF_Y,
+      TABLETOP_AIR_BOX_HALF_Z
+    ).setTranslation(
+      TABLETOP_AIR_BOX_HALF_X + TABLETOP_AIR_BOX_WALL_THICKNESS,
+      TABLETOP_AIR_BOX_CENTER_Y,
+      0
+    )
+  );
+  wall(
+    RAPIER.ColliderDesc.cuboid(
+      TABLETOP_AIR_BOX_WALL_THICKNESS,
+      TABLETOP_AIR_BOX_HALF_Y,
+      TABLETOP_AIR_BOX_HALF_Z
+    ).setTranslation(
+      -TABLETOP_AIR_BOX_HALF_X - TABLETOP_AIR_BOX_WALL_THICKNESS,
+      TABLETOP_AIR_BOX_CENTER_Y,
+      0
+    )
+  );
+  wall(
+    RAPIER.ColliderDesc.cuboid(
+      TABLETOP_AIR_BOX_HALF_X,
+      TABLETOP_AIR_BOX_HALF_Y,
+      TABLETOP_AIR_BOX_WALL_THICKNESS
+    ).setTranslation(
+      0,
+      TABLETOP_AIR_BOX_CENTER_Y,
+      TABLETOP_AIR_BOX_HALF_Z + TABLETOP_AIR_BOX_WALL_THICKNESS
+    )
+  );
+  wall(
+    RAPIER.ColliderDesc.cuboid(
+      TABLETOP_AIR_BOX_HALF_X,
+      TABLETOP_AIR_BOX_HALF_Y,
+      TABLETOP_AIR_BOX_WALL_THICKNESS
+    ).setTranslation(
+      0,
+      TABLETOP_AIR_BOX_CENTER_Y,
+      -TABLETOP_AIR_BOX_HALF_Z - TABLETOP_AIR_BOX_WALL_THICKNESS
+    )
+  );
+}
+
 function createLegacyPhysicalTossInput(
   currentThrow: number,
   requestId: number,
@@ -380,6 +438,7 @@ function createPhysicalCoinPhysicsSimulation(input: PhysicalTossInput): CoinPhys
     .setFriction(0.92 + randomGaussianOffset(random, input.perturbationScale * 0.22))
     .setRestitution(0.1);
   world.createCollider(table);
+  createTabletopAirBox(world);
 
   const microPerturbations: MicroPerturbation[] = [];
   const bodies = input.coins.map((coin, index) => {
