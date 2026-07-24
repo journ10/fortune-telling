@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { createTableMaterial } from './materials';
+import { createTableMaterial, disposePbrMaterial } from './materials';
 
 export interface TabletopSceneHandle {
   scene: THREE.Scene;
@@ -96,7 +96,7 @@ export function createTabletopScene(canvas: HTMLCanvasElement): TabletopSceneHan
     dispose: () => {
       envMap.dispose();
       table.geometry.dispose();
-      (table.material as THREE.Material).dispose();
+      disposePbrMaterial(table.material as THREE.MeshStandardMaterial);
       renderer.dispose();
     }
   };

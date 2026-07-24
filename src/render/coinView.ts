@@ -12,7 +12,8 @@ import type { QuaternionTuple, Vec3Tuple } from '../physics/physicalTossInput';
 import {
   createCoinCapMaterial,
   createCoinEdgeMaterial,
-  createCoinFaceMaterial
+  createCoinFaceMaterial,
+  disposePbrMaterial
 } from './materials';
 
 export interface CoinView {
@@ -60,10 +61,7 @@ function createCoinGroup(): { group: THREE.Group; dispose: () => void } {
       bodyGeometry.dispose();
       headsGeometry.dispose();
       tailsGeometry.dispose();
-      [capMaterial, edgeMaterial, headsMaterial, tailsMaterial].forEach((material) => {
-        material.map?.dispose();
-        material.dispose();
-      });
+      [capMaterial, edgeMaterial, headsMaterial, tailsMaterial].forEach(disposePbrMaterial);
     }
   };
 }
@@ -88,13 +86,17 @@ export function createCoinViews(scene: THREE.Scene, count = 3): CoinView[] {
 }
 
 /** Resting pose for the coins while no toss is in flight. */
-export function idleCoinPose(index: number, elapsedSeconds: number): {
+export function idleCoinPose(
+  index: number,
+  elapsedSeconds: number,
+  motionScale = 1
+): {
   position: Vec3Tuple;
   rotation: QuaternionTuple;
 } {
   const angle = (index / 3) * Math.PI * 2 - Math.PI / 2;
   const radius = 0.92;
-  const wobble = Math.sin(elapsedSeconds * 0.6 + index * 2.1) * 0.012;
+  const wobble = Math.sin(elapsedSeconds * 0.6 + index * 2.1) * 0.012 * motionScale;
 
   return {
     position: [Math.cos(angle) * radius, TABLETOP_COIN_THICKNESS / 2 + 0.002, Math.sin(angle) * radius * 0.72],
@@ -110,16 +112,17 @@ export function idleCoinPose(index: number, elapsedSeconds: number): {
 export function chargingCoinPose(
   index: number,
   elapsedSeconds: number,
-  energy: number
+  energy: number,
+  motionScale = 1
 ): { position: Vec3Tuple; rotation: QuaternionTuple } {
-  const idle = idleCoinPose(index, elapsedSeconds);
-  const amplitude = 0.05 + energy * 0.16;
+  const idle = idleCoinPose(index, elapsedSeconds, motionScale);
+  const amplitude = (0.05 + energy * 0.16) * motionScale;
   const phase = elapsedSeconds * (14 + energy * 18) + index * 2.4;
 
   const x = idle.position[0] + Math.sin(phase) * amplitude;
   const y = idle.position[1] + Math.abs(Math.sin(phase * 1.31)) * amplitude * 0.8;
   const z = idle.position[2] + Math.cos(phase * 0.87) * amplitude * 0.6;
-  const tilt = Math.sin(phase * 1.13) * (0.12 + energy * 0.4);
+  const tilt = Math.sin(phase * 1.13) * (0.12 + energy * 0.4) * motionScale;
 
   return {
     position: [x, y, z],
