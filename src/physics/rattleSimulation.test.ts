@@ -216,6 +216,31 @@ describe('createRattleSimulation', () => {
     expect(handoff.coins[2].position).toEqual([0.5, 0.04, 0.3]);
   });
 
+  it('produces appreciable motion under gentle-shake drive (M5 sensitivity)', () => {
+    // 温和摇晃经响应曲线后的典型驱动能量（≈0.45）：2 秒内铜钱必须明显动起来。
+    const simulation = createRattleSimulation(31);
+    let maxSpeed = 0;
+    let maxY = 0;
+
+    for (let frame = 0; frame < 120; frame += 1) {
+      const t = frame / 60;
+      const snapshot = simulation.step(1 / 60, {
+        x: Math.sin(t * 9),
+        z: Math.cos(t * 7.3),
+        energy: 0.45
+      });
+      snapshot.coins.forEach((coin) => {
+        maxSpeed = Math.max(maxSpeed, Math.hypot(...coin.linearVelocity));
+        maxY = Math.max(maxY, coin.position[1]);
+      });
+    }
+
+    expect(maxSpeed).toBeGreaterThan(0.4);
+    // 温和驱动下也有可感知的跳起（静置高度 0.036）。
+    expect(maxY).toBeGreaterThan(TABLETOP_COIN_THICKNESS + 0.004);
+    simulation.dispose();
+  });
+
   it('disposes cleanly and supports repeated create/dispose cycles (cancel/reset)', () => {
     for (const seed of [1, 2, 3]) {
       const simulation = createRattleSimulation(seed);

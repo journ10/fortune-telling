@@ -150,3 +150,59 @@ export function cancelChamberCharge(
 
   return createPointerChamber();
 }
+
+// ---------------------------------------------------------------------------
+// Agitation response curve (M5): raw chamber energy is linear and heavily
+// viewport-normalized — 实测自然手腕摇晃（450-600 px/s）只累积到 0.11-0.14，
+// 夸张甩动（1800 px/s）也只有 0.48。直接线性驱动摇钱会感觉"太肉"。
+// 响应曲线按自然摇晃标定：小输入开根号放大 + 微地板，大输入封顶。
+// ---------------------------------------------------------------------------
+
+/**
+ * 标定依据（1440px 视口正弦摇晃实测）：
+ *   200 px/s → raw 0.06 → 响应 0.43（明确反馈）
+ *   450 px/s → raw 0.11 → 响应 0.54（自然摇晃明显蹦跳）
+ *   900 px/s → raw 0.23 → 响应 0.73
+ *   1400 px/s → raw 0.38 → 响应 0.90
+ *   1800 px/s → raw 0.48 → 响应 1.00（夸张甩动封顶）
+ */
+export function agitationResponseEnergy(rawEnergy: number): number {
+  if (rawEnergy < 0.01) {
+    return 0;
+  }
+  return Math.min(1, 0.12 + Math.sqrt(rawEnergy * 1.6));
+}
+
+export interface ChamberAgitation {
+  /** 世界系水平方向（屏幕 x→世界 x，屏幕 y→世界 z），未归一化。 */
+  x: number;
+  z: number;
+  /** 经响应曲线标定后的 0..1 驱动能量。 */
+  energy: number;
+}
+
+/** 从滚动采样窗口推导摇钱驱动：方向取最近两个采样的指针速度，能量过响应曲线。 */
+export function agitationFromChamber(
+  state: PointerChamberState,
+  sceneWidth: number,
+  sceneHeight: number,
+  now: number
+): ChamberAgitation {
+  const samples = state.samples;
+  const last = samples[samples.length - 1];
+  const previous = samples[samples.length - 2];
+
+  let x = 0;
+  let z = 0;
+  if (last && previous) {
+    const dt = Math.max(1, last.timestamp - previous.timestamp) / 1000;
+    x = ((last.x - previous.x) / Math.max(sceneWidth, 1)) / dt;
+    z = ((last.y - previous.y) / Math.max(sceneHeight, 1)) / dt;
+  }
+
+  return {
+    x,
+    z,
+    energy: agitationResponseEnergy(summarizeChamberEnergy(state, sceneWidth, sceneHeight, now).energy)
+  };
+}

@@ -22,6 +22,8 @@ import {
   summarizeKeyboardEnergy
 } from '../input/keyboardToss';
 import {
+  agitationFromChamber,
+  agitationResponseEnergy,
   beginChamberCharge,
   cancelChamberCharge,
   createPointerChamber,
@@ -247,16 +249,18 @@ export function useCastingController(): CastingController {
     );
     setChargeEnergy(summary.energy);
 
-    // 摇钱扰动：最近两个采样的指针速度（屏幕系 x→世界 x，y→世界 z）。
+    // 摇钱扰动：方向取指针速度，能量过响应曲线（自然摇晃也有明显反馈）。
     const rattle = activeRattleRef.current;
-    const samples = chamberRef.current.samples;
-    if (rattle && samples.length >= 2) {
-      const last = samples[samples.length - 1];
-      const previous = samples[samples.length - 2];
-      const dt = Math.max(1, last.timestamp - previous.timestamp) / 1000;
-      rattle.agitation.x = ((last.x - previous.x) / Math.max(rect.width, 1)) / dt;
-      rattle.agitation.z = ((last.y - previous.y) / Math.max(rect.height, 1)) / dt;
-      rattle.agitation.energy = summary.energy;
+    if (rattle) {
+      const agitation = agitationFromChamber(
+        chamberRef.current,
+        rect.width,
+        rect.height,
+        event.timeStamp
+      );
+      rattle.agitation.x = agitation.x;
+      rattle.agitation.z = agitation.z;
+      rattle.agitation.energy = agitation.energy;
     }
   }, []);
 
@@ -359,7 +363,7 @@ export function useCastingController(): CastingController {
       if (rattle) {
         rattle.agitation.x = 0;
         rattle.agitation.z = 0;
-        rattle.agitation.energy = summary.energy;
+        rattle.agitation.energy = agitationResponseEnergy(summary.energy);
       }
     }, 90);
 
@@ -408,7 +412,7 @@ export function useCastingController(): CastingController {
     if (rattle) {
       rattle.agitation.x = 0;
       rattle.agitation.z = 0;
-      rattle.agitation.energy = clamped;
+      rattle.agitation.energy = agitationResponseEnergy(clamped);
     }
   }, []);
 

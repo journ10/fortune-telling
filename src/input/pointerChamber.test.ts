@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  agitationFromChamber,
+  agitationResponseEnergy,
   beginChamberCharge,
   cancelChamberCharge,
   createPointerChamber,
@@ -118,5 +120,41 @@ describe('pointerChamber', () => {
     });
 
     expect(sealed?.input.energy).toBeGreaterThanOrEqual(0.32);
+  });
+});
+
+describe('agitation response curve (M5)', () => {
+  it('maps raw energy through the calibrated nonlinear curve', () => {
+    // 标定点：自然摇晃 raw≈0.11 → ≥0.5；夸张甩动 raw≈0.48 → ≈1.0；静止 → 0。
+    expect(agitationResponseEnergy(0)).toBe(0);
+    expect(agitationResponseEnergy(0.005)).toBe(0);
+    expect(agitationResponseEnergy(0.11)).toBeGreaterThanOrEqual(0.5);
+    expect(agitationResponseEnergy(0.48)).toBeGreaterThanOrEqual(0.95);
+    expect(agitationResponseEnergy(1)).toBe(1);
+    // 单调性：输入越大响应越强。
+    expect(agitationResponseEnergy(0.23)).toBeGreaterThan(agitationResponseEnergy(0.11));
+  });
+
+  it('gives gentle wrist shakes a clear agitation drive', () => {
+    // 温和摇晃：~300 px/s 正弦（1440px 视口），raw energy 只有 ~0.09。
+    let chamber = beginChamberCharge(createPointerChamber(), 3, 720, 450, 0);
+    for (let t = 16; t <= 240; t += 16) {
+      chamber = recordChamberSample(chamber, 3, 720 + 48 * Math.sin(t / 1000 * 2 * Math.PI), 450, t);
+    }
+
+    const raw = summarizeChamberEnergy(chamber, 1440, 900, 240).energy;
+    expect(raw).toBeLessThan(0.15);
+
+    const agitation = agitationFromChamber(chamber, 1440, 900, 240);
+    // 响应曲线后仍有明确驱动（温和摇晃不再"太肉"）。
+    expect(agitation.energy).toBeGreaterThanOrEqual(0.35);
+    // 方向来自指针速度（正弦在 t=240ms 附近向 +x 或 -x 运动，非零）。
+    expect(Math.hypot(agitation.x, agitation.z)).toBeGreaterThan(0.01);
+  });
+
+  it('produces zero agitation without movement', () => {
+    const chamber = beginChamberCharge(createPointerChamber(), 3, 720, 450, 0);
+    const agitation = agitationFromChamber(chamber, 1440, 900, 0);
+    expect(agitation.energy).toBe(0);
   });
 });
