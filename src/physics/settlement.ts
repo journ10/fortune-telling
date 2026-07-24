@@ -1,8 +1,9 @@
 // Headless settlement rules for the coin toss simulation.
 //
 // Two physical outcomes, never a generated one:
-// - `strict`: every coin is slow (linear & angular velocity below
-//   thresholds) AND every face normal is essentially vertical.
+// - `strict`: every coin has LANDED (center height at tabletop level),
+//   is slow (linear & angular velocity below thresholds) AND every face
+//   normal is essentially vertical. Never settles mid-air.
 // - `timeout-readable`: the strict window elapsed but every coin has a
 //   readable face orientation, so we read the current body rotations.
 //
@@ -20,7 +21,7 @@ import {
 
 export { READABLE_FACE_NORMAL_Y, SETTLED_FACE_NORMAL_Y };
 import type { QuaternionTuple, Vec3Tuple } from './physicalTossInput';
-import { TABLETOP_COIN_RADIUS } from './coinDimensions';
+import { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS } from './coinDimensions';
 
 export type SettledReason = 'strict' | 'timeout-readable';
 
@@ -44,6 +45,12 @@ export const TIMEOUT_READABLE_SECONDS = 3.0;
 export const HARD_CAP_SECONDS = 12;
 export const LINEAR_SLEEP_SPEED = 0.13;
 export const ANGULAR_SLEEP_SPEED = 0.55;
+/**
+ * strict 落定的高度上限：铜钱必须已接触桌面。
+ * 平躺中心高约 thickness/2（0.018），叠在另一枚上约 0.054，
+ * 0.126 容忍叠放/斜靠，同时排除一切空中状态。
+ */
+export const SETTLED_MAX_HEIGHT = TABLETOP_COIN_THICKNESS * 3.5;
 /** Edge destabilization starts only after coins have landed. */
 export const EDGE_INSTABILITY_AFTER_SECONDS = 1.15;
 /** Coins above this height are still airborne; never destabilize them. */
@@ -68,8 +75,10 @@ export function evaluateSettlement(
       speedOf(sample.linearVelocity) <= LINEAR_SLEEP_SPEED &&
       speedOf(sample.angularVelocity) <= ANGULAR_SLEEP_SPEED
   );
+  // 空中绝不定格：strict 要求每枚铜钱都已接触桌面（含叠放/斜靠）。
+  const allLanded = samples.every((sample) => sample.positionY <= SETTLED_MAX_HEIGHT);
 
-  if (allFlat && allSlow) {
+  if (allFlat && allSlow && allLanded) {
     return { status: 'settled', reason: 'strict' };
   }
 

@@ -10,7 +10,8 @@ import {
   createKeyboardPhysicalTossInput,
   createPointerPhysicalTossInput,
   type PhysicalTossInput,
-  type QuaternionTuple
+  type QuaternionTuple,
+  type Vec3Tuple
 } from './physicalTossInput';
 import {
   ANGULAR_SLEEP_SPEED,
@@ -18,7 +19,10 @@ import {
   MIN_SETTLE_SECONDS,
   READABLE_FACE_NORMAL_Y,
   SETTLED_FACE_NORMAL_Y,
-  TIMEOUT_READABLE_SECONDS
+  SETTLED_MAX_HEIGHT,
+  TIMEOUT_READABLE_SECONDS,
+  evaluateSettlement,
+  type CoinSettlementSample
 } from './settlement';
 import {
   COIN_TOSS_SIMULATION_ENGINE,
@@ -287,5 +291,42 @@ describe('createCoinTossSimulation', () => {
     settled.faces.forEach((face: CoinFace, index: number) => {
       expect(face).toBe(readCoinFace(finalRotations[index]));
     });
+  });
+
+  it('never strict-settles while any coin is still airborne (M5 regression)', () => {
+    const airborne: CoinSettlementSample[] = [0, 1, 2].map((index) => ({
+      positionY: 0.4 + index * 0.1,
+      rotation: [0, 0, 0, 1] as QuaternionTuple,
+      linearVelocity: [0, 0, 0] as Vec3Tuple,
+      angularVelocity: [0, 0, 0] as Vec3Tuple
+    }));
+
+    // 慢速 + 平放法线 + 已过最短落定时间，但全部悬空 → 必须 pending。
+    expect(evaluateSettlement(airborne, MIN_SETTLE_SECONDS + 0.5).status).toBe('pending');
+    expect(evaluateSettlement(airborne, TIMEOUT_READABLE_SECONDS - 0.1).status).toBe('pending');
+
+    // 同样本贴地后 → strict。
+    const landed = airborne.map((sample) => ({ ...sample, positionY: 0.03 }));
+    expect(evaluateSettlement(landed, MIN_SETTLE_SECONDS + 0.5)).toEqual({
+      status: 'settled',
+      reason: 'strict'
+    });
+  });
+
+  it('reads faces only after every coin has reached the tabletop (M5 regression)', () => {
+    // 逐帧步进的正常投掷：faces 被读取的时刻，所有铜钱必须已落在桌面上。
+    for (const seed of [7, 42, 1337]) {
+      const input = createPointerInput(seed);
+      const simulation = createCoinTossSimulation(input);
+      const settled = simulation.runToSettlement();
+      const snapshot = simulation.snapshot();
+
+      expect(settled.settledReason).toBe('strict');
+      snapshot.coins.forEach((coin) => {
+        expect(coin.position[1]).toBeLessThanOrEqual(SETTLED_MAX_HEIGHT);
+      });
+
+      simulation.dispose();
+    }
   });
 });

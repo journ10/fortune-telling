@@ -45,6 +45,15 @@ const MAX_PENETRATION = 0.018;
 const PENETRATION_LINEAR_DAMPING = 0.94;
 const PENETRATION_ANGULAR_DAMPING = 0.985;
 const MAX_STEP_DELTA_SECONDS = 0.1;
+/**
+ * 接触感知阻尼：铜钱腾空时阻尼极小（飞行/翻滚不受干扰）；
+ * 一旦接触桌面，阻尼加大模拟桌面摩擦吸能，让铜钱在物理上停稳，
+ * 而不是靠 timeout-readable 在空中定格（M5 bugfix）。
+ */
+const AIRBORNE_DAMPING = 0.05;
+const TABLE_LINEAR_DAMPING = 2.2;
+const TABLE_ANGULAR_DAMPING = 3.2;
+const TABLE_CONTACT_BOTTOM_CLEARANCE = 0.02;
 
 export interface SettledToss {
   faces: [CoinFace, CoinFace, CoinFace];
@@ -151,6 +160,21 @@ function keepCoinsAboveTable(bodies: readonly RAPIER.RigidBody[]): void {
       },
       true
     );
+  });
+}
+
+/**
+ * Contact-aware damping: airborne coins keep minimal damping (flight and
+ * tumbling untouched); once a coin touches the table, stronger damping
+ * absorbs bounce/roll energy so it physically comes to rest.
+ */
+function updateContactDamping(bodies: readonly RAPIER.RigidBody[]): void {
+  bodies.forEach((body) => {
+    const bottomY =
+      body.translation().y - colliderVerticalExtent(quaternionFromRapier(body.rotation()));
+    const onTable = bottomY <= TABLE_CONTACT_BOTTOM_CLEARANCE;
+    body.setLinearDamping(onTable ? TABLE_LINEAR_DAMPING : AIRBORNE_DAMPING);
+    body.setAngularDamping(onTable ? TABLE_ANGULAR_DAMPING : AIRBORNE_DAMPING);
   });
 }
 
@@ -273,6 +297,7 @@ export function createCoinTossSimulation(input: PhysicalTossInput): CoinTossSimu
       accumulator += Math.min(deltaSeconds, MAX_STEP_DELTA_SECONDS);
 
       while (accumulator >= SETTLEMENT_TIMESTEP && !settledToss) {
+        updateContactDamping(bodies);
         world.timestep = SETTLEMENT_TIMESTEP;
         world.step();
         keepCoinsAboveTable(bodies);
