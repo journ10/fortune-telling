@@ -369,15 +369,15 @@ export const RATTLE_FENCE_X = 1.8;
 export const RATTLE_FENCE_Z = 1.2;
 const RATTLE_WALL_HALF_HEIGHT = 0.3;
 const RATTLE_WALL_THICKNESS = 0.06;
-const RATTLE_HORIZONTAL_IMPULSE = 0.05;
-const RATTLE_VERTICAL_IMPULSE = 0.34;
+const RATTLE_HORIZONTAL_IMPULSE = 0.085;
+const RATTLE_VERTICAL_IMPULSE = 0.27;
 // 每个子步的跳起概率（energy=1 时约 11 次/秒），形成随机真实的蹦跳。
-const RATTLE_HOP_CHANCE = 0.16;
+const RATTLE_HOP_CHANCE = 0.13;
 // 摇钱阻尼低于投掷落桌阻尼（2.2/3.2）：让铜钱持续跳动，输入停止后自然平静。
-const RATTLE_LINEAR_DAMPING = 0.9;
-const RATTLE_ANGULAR_DAMPING = 1.6;
+const RATTLE_LINEAR_DAMPING = 0.7;
+const RATTLE_ANGULAR_DAMPING = 1.2;
 /** 任何情况下铜钱中心不得越过的高度（物理兜底，防能量堆积飞出）。 */
-const RATTLE_MAX_COIN_HEIGHT = 0.6;
+const RATTLE_MAX_COIN_HEIGHT = 0.8;
 
 export function createRattleSimulation(seed = 1): RattleSimulation {
   const rapier = rapierModule;
@@ -558,4 +558,51 @@ export function createRattleSimulation(seed = 1): RattleSimulation {
       world.free();
     }
   };
+}
+
+// ---------------------------------------------------------------------------
+// Release handoff (M5): 投掷仿真的初始位置/朝向接力自摇钱世界的最终快照，
+// 速度仍由 PhysicalTossInput mapper 决定。契约与证据链语义不变——
+// PhysicalTossInput 描述的本来就是"仿真开始时的初始状态"。
+// ---------------------------------------------------------------------------
+
+function isSaneHandoffPose(position: Vec3Tuple, rotation: QuaternionTuple): boolean {
+  if (![...position, ...rotation].every(Number.isFinite)) {
+    return false;
+  }
+  const quaternionNorm = Math.hypot(...rotation);
+  if (quaternionNorm < 0.5) {
+    return false;
+  }
+  return (
+    Math.abs(position[0]) <= RATTLE_FENCE_X &&
+    position[1] >= 0 &&
+    position[1] <= RATTLE_MAX_COIN_HEIGHT + 0.05 &&
+    Math.abs(position[2]) <= RATTLE_FENCE_Z
+  );
+}
+
+/**
+ * Mint the toss initial state from a rattle snapshot: each coin keeps the
+ * mapper's velocities but inherits its rattle-world position/rotation, so
+ * release has no visual jump. Any invalid coin pose falls back to the
+ * mapper's own placement for that coin.
+ */
+export function applyRattleHandoff(
+  input: PhysicalTossInput,
+  snapshot: CoinTossSimulationSnapshot
+): PhysicalTossInput {
+  const coins = input.coins.map((coin, index) => {
+    const rattleCoin = snapshot.coins[index];
+    if (!rattleCoin || !isSaneHandoffPose(rattleCoin.position, rattleCoin.rotation)) {
+      return coin;
+    }
+    return {
+      ...coin,
+      position: [...rattleCoin.position] as Vec3Tuple,
+      rotation: [...rattleCoin.rotation] as QuaternionTuple
+    };
+  });
+
+  return { ...input, coins: coins as PhysicalTossInput['coins'] };
 }

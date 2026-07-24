@@ -6,9 +6,11 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { faceNormalYFromQuaternion } from './faceReader';
 import { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS } from './coinDimensions';
 import type { QuaternionTuple, Vec3Tuple } from './physicalTossInput';
+import { createPointerPhysicalTossInput } from './physicalTossInput';
 import {
   RATTLE_FENCE_X,
   RATTLE_FENCE_Z,
+  applyRattleHandoff,
   createRattleSimulation,
   initTossPhysics,
   type CoinTossSimulationSnapshot
@@ -120,8 +122,98 @@ describe('createRattleSimulation', () => {
 
     // 跳动存在但有界（物理兜底高度 0.6）。
     expect(maxY).toBeGreaterThan(TABLETOP_COIN_THICKNESS);
-    expect(maxY).toBeLessThanOrEqual(0.6 + 0.001);
+    expect(maxY).toBeLessThanOrEqual(0.8 + 0.001);
     simulation.dispose();
+  });
+
+  it('hands off rattle poses to the toss input while keeping mapper velocities', () => {
+    // rattle 末态（摇过的位置/朝向）
+    const simulation = createRattleSimulation(77);
+    const snapshot = stepSeconds(simulation, 1.5, (t) => ({
+      x: Math.sin(t * 9),
+      z: Math.cos(t * 7.3),
+      energy: 0.8
+    }));
+    simulation.dispose();
+
+    const mapperInput = createPointerPhysicalTossInput({
+      currentThrow: 1,
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0xabc123,
+      samples: [
+        { x: 200, y: 260, timestamp: 0 },
+        { x: 260, y: 220, timestamp: 90 },
+        { x: 350, y: 170, timestamp: 180 }
+      ]
+    });
+
+    const handoff = applyRattleHandoff(mapperInput, snapshot);
+
+    handoff.coins.forEach((coin, index) => {
+      // 位置/朝向接力自 rattle 末态。
+      coin.position.forEach((component, componentIndex) => {
+        expect(component).toBeCloseTo(snapshot.coins[index].position[componentIndex], 6);
+      });
+      coin.rotation.forEach((component, componentIndex) => {
+        expect(component).toBeCloseTo(snapshot.coins[index].rotation[componentIndex], 6);
+      });
+      // 速度仍由 mapper 决定。
+      coin.linearVelocity.forEach((component, componentIndex) => {
+        expect(component).toBeCloseTo(mapperInput.coins[index].linearVelocity[componentIndex], 6);
+      });
+      coin.angularVelocity.forEach((component, componentIndex) => {
+        expect(component).toBeCloseTo(mapperInput.coins[index].angularVelocity[componentIndex], 6);
+      });
+    });
+    // 契约其余字段原样保留（证据链语义不变）。
+    expect(handoff.energy).toBe(mapperInput.energy);
+    expect(handoff.perturbationSeed).toBe(mapperInput.perturbationSeed);
+    expect(handoff.source).toBe(mapperInput.source);
+  });
+
+  it('falls back to the mapper pose for any coin with an invalid rattle pose', () => {
+    const mapperInput = createPointerPhysicalTossInput({
+      currentThrow: 2,
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0xdef456,
+      samples: [
+        { x: 200, y: 260, timestamp: 0 },
+        { x: 350, y: 170, timestamp: 180 }
+      ]
+    });
+
+    const snapshot: CoinTossSimulationSnapshot = {
+      elapsedSeconds: 1,
+      settledToss: null,
+      coins: [
+        {
+          position: [Number.NaN, 0.03, 0],
+          rotation: [0, 0, 0, 1],
+          linearVelocity: [0, 0, 0],
+          angularVelocity: [0, 0, 0]
+        },
+        {
+          position: [99, 0.03, 0], // 出围栏
+          rotation: [0, 0, 0, 1],
+          linearVelocity: [0, 0, 0],
+          angularVelocity: [0, 0, 0]
+        },
+        {
+          position: [0.5, 0.04, 0.3], // 合法 → 接力
+          rotation: [0, 0, 0, 1],
+          linearVelocity: [0, 0, 0],
+          angularVelocity: [0, 0, 0]
+        }
+      ]
+    };
+
+    const handoff = applyRattleHandoff(mapperInput, snapshot);
+
+    expect(handoff.coins[0].position).toEqual(mapperInput.coins[0].position);
+    expect(handoff.coins[1].position).toEqual(mapperInput.coins[1].position);
+    expect(handoff.coins[2].position).toEqual([0.5, 0.04, 0.3]);
   });
 
   it('disposes cleanly and supports repeated create/dispose cycles (cancel/reset)', () => {
