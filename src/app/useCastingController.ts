@@ -36,7 +36,7 @@ import {
   type CoinTossSimulation,
   type SettledToss
 } from '../physics/tossSimulation';
-import type { QuestionType } from '../domain/types';
+import type { AiReading, QuestionType } from '../domain/types';
 
 /** Beat between physical settlement and recording the line, so the user can see the coins rest. */
 const SETTLED_DISPLAY_MS = 750;
@@ -74,6 +74,12 @@ export interface CastingController {
   /** Abort a charge started by an external detector (e.g. discarded weak shake). */
   cancelExternalCharge: () => void;
   setQuestion: (question: string, questionType: QuestionType) => void;
+  /** 请求进入 AI 解读；返回状态机是否接受（仅 result/reading-error/reading-ready 可进入）。 */
+  startAiReading: () => boolean;
+  /** AI 解读成功，写入结果。 */
+  finishAiReading: (reading: AiReading) => void;
+  /** AI 解读失败，保留传统结果并可重试。 */
+  failAiReading: (message: string) => void;
   resetCasting: () => void;
 }
 
@@ -327,6 +333,21 @@ export function useCastingController(): CastingController {
     dispatch({ type: 'set-question', question, questionType });
   }, []);
 
+  const startAiReading = useCallback((): boolean => {
+    const before = sessionRef.current.machine.phase;
+    dispatch({ type: 'reading-started' });
+    // useReducer dispatch 是同步排队；是否被接受以当前相位判断为准。
+    return before === 'result' || before === 'reading-error' || before === 'reading-ready';
+  }, []);
+
+  const finishAiReading = useCallback((reading: AiReading) => {
+    dispatch({ type: 'reading-finished', reading });
+  }, []);
+
+  const failAiReading = useCallback((message: string) => {
+    dispatch({ type: 'reading-failed', message });
+  }, []);
+
   const setExternalEnergy = useCallback((energy: number) => {
     setChargeEnergy(Math.min(1, Math.max(0, energy)));
   }, []);
@@ -382,6 +403,9 @@ export function useCastingController(): CastingController {
     releaseExternalToss,
     cancelExternalCharge: cancelCharge,
     setQuestion,
+    startAiReading,
+    finishAiReading,
+    failAiReading,
     resetCasting
   };
 }

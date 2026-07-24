@@ -2,25 +2,39 @@
 // config gate — question input and AI settings are optional overlays.
 
 import { useEffect, useState } from 'react';
-import { DEFAULT_AI_SETTINGS } from '../ai/aiSettings';
+import { loadAiSettings, saveAiSettings, type AiSettings } from '../ai/aiSettings';
 import AiSettingsPanel from '../ui/AiSettingsPanel';
 import CastingHud from '../ui/CastingHud';
 import MotionTossPanel from '../ui/MotionTossPanel';
 import QuestionEntry from '../ui/QuestionEntry';
-import ResultPanel from '../ui/ResultPanel';
+import ResultPanel, { type AiReadingStatus } from '../ui/ResultPanel';
 import TabletopView from '../ui/TabletopView';
+import { useAiReading } from './useAiReading';
 import { useCastingController } from './useCastingController';
 import { useDeviceShake } from './useDeviceShake';
+
+/** 结果链路相位：成卦后（含 AI 解读中/成功/失败）结果页保持可见。 */
+const RESULT_PHASES = new Set(['result', 'reading', 'reading-ready', 'reading-error']);
 
 export default function App() {
   const controller = useCastingController();
   const shake = useDeviceShake(controller);
   const { session } = controller;
-  const [aiSettings, setAiSettings] = useState(DEFAULT_AI_SETTINGS);
+  const [aiSettings, setAiSettings] = useState<AiSettings>(loadAiSettings);
   const [showAiSettings, setShowAiSettings] = useState(false);
   const [showResult, setShowResult] = useState(false);
 
-  const resultReady = controller.phase === 'result' && session.result !== null;
+  const resultReady = RESULT_PHASES.has(controller.phase) && session.result !== null;
+
+  const ai = useAiReading({
+    phase: controller.phase,
+    result: session.result,
+    evidences: session.evidences,
+    aiSettings,
+    onStart: controller.startAiReading,
+    onFinish: controller.finishAiReading,
+    onFail: controller.failAiReading
+  });
 
   useEffect(() => {
     if (resultReady) {
@@ -32,6 +46,19 @@ export default function App() {
     setShowResult(false);
     controller.resetCasting();
   };
+
+  const handleAiSettingsClose = () => {
+    saveAiSettings(aiSettings);
+    setShowAiSettings(false);
+  };
+
+  const aiStatus: AiReadingStatus = !ai.configured
+    ? { kind: 'unconfigured' }
+    : controller.phase === 'reading-ready' && session.aiReading
+      ? { kind: 'ready', reading: session.aiReading }
+      : controller.phase === 'reading-error'
+        ? { kind: 'error', message: session.aiError ?? 'AI 解读失败，请稍后重试' }
+        : { kind: 'reading' };
 
   return (
     <main className="appShell">
@@ -86,6 +113,8 @@ export default function App() {
           result={session.result}
           tosses={session.tosses}
           evidences={session.evidences}
+          aiStatus={aiStatus}
+          onRetryAi={ai.retry}
           onClose={() => setShowResult(false)}
           onReset={handleReset}
           onOpenAiSettings={() => setShowAiSettings(true)}
@@ -96,7 +125,7 @@ export default function App() {
         <AiSettingsPanel
           aiSettings={aiSettings}
           onAiSettingsChange={setAiSettings}
-          onClose={() => setShowAiSettings(false)}
+          onClose={handleAiSettingsClose}
         />
       ) : null}
     </main>

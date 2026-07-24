@@ -9,10 +9,6 @@ interface AiSettingsPanelProps {
   onClose: () => void;
 }
 
-export function hasCompleteAiSettings(settings: AiSettings): boolean {
-  return Boolean(settings.apiKey.trim() && settings.apiUrl.trim() && settings.model.trim());
-}
-
 export default function AiSettingsPanel({
   aiSettings,
   onAiSettingsChange,
@@ -37,8 +33,9 @@ export default function AiSettingsPanel({
           </button>
         </header>
         <p className="mutedText">
-          AI 解读为可选项，未配置不影响起卦与传统结果。API Key 仅保存在当前页面状态中，
-          适合个人自用。
+          AI 解读为可选项，未配置不影响起卦与传统结果。设置保存在本机浏览器
+          localStorage 中；前端直连 AI 服务会暴露 API Key，仅适合个人自用，
+          请勿在共享设备上填写。
         </p>
         <div className="formGrid">
           <label className="formField" htmlFor="ai-provider">

@@ -52,7 +52,11 @@ function phaseInstruction(
     case 'settled':
       return '铜钱已落定';
     case 'result':
+    case 'reading-ready':
+    case 'reading-error':
       return '六爻已成，查看结果';
+    case 'reading':
+      return 'AI 解读生成中…';
   }
 }
 

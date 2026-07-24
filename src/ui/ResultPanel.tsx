@@ -3,23 +3,110 @@
 // evidence. AI reading is an optional, fully-late placeholder (M4).
 
 import type { CastingEvidence } from '../casting/evidence';
-import type { CastingResult, CoinToss } from '../domain/types';
+import type { AiReading, CastingResult, CoinToss } from '../domain/types';
 import EvidencePanel from './EvidencePanel';
 import HexagramFigure from './HexagramFigure';
+
+/** AI 解读在结果页的呈现状态；传统结果始终完整渲染，与它无关。 */
+export type AiReadingStatus =
+  | { kind: 'unconfigured' }
+  | { kind: 'reading' }
+  | { kind: 'ready'; reading: AiReading }
+  | { kind: 'error'; message: string };
 
 interface ResultPanelProps {
   result: CastingResult;
   tosses: CoinToss[];
   evidences: CastingEvidence[];
+  aiStatus: AiReadingStatus;
+  onRetryAi?: () => void;
   onClose: () => void;
   onReset: () => void;
   onOpenAiSettings?: () => void;
+}
+
+function AiReadingSection({
+  aiStatus,
+  onRetryAi,
+  onOpenAiSettings
+}: {
+  aiStatus: AiReadingStatus;
+  onRetryAi?: () => void;
+  onOpenAiSettings?: () => void;
+}) {
+  if (aiStatus.kind === 'unconfigured') {
+    return (
+      <section className="resultSection aiReading" data-testid="ai-unconfigured">
+        <h3>AI 解读（可选）</h3>
+        <p className="mutedText">
+          传统结果已完整可用。如需 AI 白话解读，请先配置 AI 服务。
+        </p>
+        {onOpenAiSettings ? (
+          <button type="button" className="ghostButton" onClick={onOpenAiSettings}>
+            配置 AI
+          </button>
+        ) : null}
+      </section>
+    );
+  }
+
+  if (aiStatus.kind === 'reading') {
+    return (
+      <section className="resultSection aiReading" data-testid="ai-reading" aria-live="polite">
+        <h3>AI 解读</h3>
+        <p className="mutedText">AI 解读生成中…传统结果不受影响。</p>
+      </section>
+    );
+  }
+
+  if (aiStatus.kind === 'error') {
+    return (
+      <section className="resultSection aiReading" data-testid="ai-error" role="alert">
+        <h3>AI 解读</h3>
+        <p className="mutedText">AI 解读失败：{aiStatus.message}</p>
+        <p className="mutedText">传统结果完整保留，可重试或检查 AI 配置。</p>
+        <div className="aiErrorActions">
+          {onRetryAi ? (
+            <button type="button" className="ghostButton" onClick={onRetryAi}>
+              重试 AI 解读
+            </button>
+          ) : null}
+          {onOpenAiSettings ? (
+            <button type="button" className="ghostButton" onClick={onOpenAiSettings}>
+              打开 AI 设置
+            </button>
+          ) : null}
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="resultSection aiReading" data-testid="ai-ready">
+      <details open>
+        <summary>
+          <h3>AI 解读 · {aiStatus.reading.headline}</h3>
+        </summary>
+        {aiStatus.reading.plainText.split(/\n+/).map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
+        <h4>建议</h4>
+        <ul className="basisList">
+          {aiStatus.reading.advice.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </details>
+    </section>
+  );
 }
 
 export default function ResultPanel({
   result,
   tosses,
   evidences,
+  aiStatus,
+  onRetryAi,
   onClose,
   onReset,
   onOpenAiSettings
@@ -112,17 +199,11 @@ export default function ResultPanel({
           <EvidencePanel evidences={evidences} />
         </section>
 
-        <section className="resultSection aiPlaceholder">
-          <h3>AI 解读（可选）</h3>
-          <p className="mutedText">
-            AI 解读将在后续版本接入；传统结果不依赖 AI，已完整可用。
-          </p>
-          {onOpenAiSettings ? (
-            <button type="button" className="ghostButton" onClick={onOpenAiSettings}>
-              预先配置 AI
-            </button>
-          ) : null}
-        </section>
+        <AiReadingSection
+          aiStatus={aiStatus}
+          onRetryAi={onRetryAi}
+          onOpenAiSettings={onOpenAiSettings}
+        />
       </div>
 
       <footer className="resultFooter">
