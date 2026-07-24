@@ -7,6 +7,9 @@ import {
   type PhysicalCoinInitialState,
   type PhysicalTossInput
 } from './physicalTossInput';
+import { createSeededRandom, randomGaussianOffset, type SeededRandom } from './seededRandom';
+
+export { createSeededRandom, randomGaussianOffset, type SeededRandom };
 
 export const COIN_PHYSICS_ENGINE = 'rapier3d-compat';
 
@@ -41,10 +44,6 @@ export const COIN_PHYSICS_RESTITUTION_VARIATION = 0.08;
 const VISUAL_FROM_PHYSICS_ROTATION = new THREE.Quaternion().setFromEuler(
   new THREE.Euler(-Math.PI / 2, 0, 0)
 );
-
-export interface SeededRandom {
-  (): number;
-}
 
 export interface CoinMaterialProfile {
   friction: number;
@@ -96,30 +95,6 @@ let rapierInitPromise: Promise<void> | null = null;
 export function initCoinPhysics(): Promise<void> {
   rapierInitPromise ??= RAPIER.init();
   return rapierInitPromise;
-}
-
-export function createSeededRandom(seed: number): SeededRandom {
-  let value = seed >>> 0;
-
-  return () => {
-    value = (Math.imul(value, 1664525) + 1013904223) >>> 0;
-    return value / 4294967296;
-  };
-}
-
-const GAUSSIAN_MAX_SIGMA = 2.4;
-
-export function randomGaussianOffset(
-  random: SeededRandom,
-  maxMagnitude: number,
-  maxSigma = GAUSSIAN_MAX_SIGMA
-): number {
-  const u1 = Math.max(random(), Number.EPSILON);
-  const u2 = random();
-  const gaussian = Math.sqrt(-2 * Math.log(u1)) * Math.cos(Math.PI * 2 * u2);
-  const boundedGaussian = Math.min(Math.max(gaussian, -maxSigma), maxSigma);
-
-  return (boundedGaussian / maxSigma) * maxMagnitude;
 }
 
 export function createCoinMaterialProfile(random: SeededRandom): CoinMaterialProfile {

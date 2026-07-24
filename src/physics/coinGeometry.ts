@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 
-export const TABLETOP_COIN_RADIUS = 0.5;
-export const TABLETOP_COIN_THICKNESS = 0.036;
+import { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS } from './coinDimensions';
+
+export { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS };
 
 const COIN_FACE_TEXTURE_OFFSET = 0.004;
 const COIN_RELIEF_DEPTH = 0.0025;
