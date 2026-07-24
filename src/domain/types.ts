@@ -65,7 +65,8 @@ export interface CastingResult {
   basis: string[];
 }
 
-export interface AiInterpretation extends CastingResult {
+/** AI 解读输出契约（见 ai/openaiReading）：不含任何传统结果字段。 */
+export interface AiReading {
   headline: string;
   plainText: string;
   advice: string[];

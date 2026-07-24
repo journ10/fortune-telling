@@ -1,4 +1,11 @@
-import type { AiInterpretation, CastingResult, CoinToss } from '../domain/types';
+// AI 解读请求层（OpenAI-compatible）。
+//
+// AI 完全后置：本模块只消费已成卦的 CastingResult 与六次投掷证据，
+// 起卦链路不知道它的存在。返回格式 { headline, plainText, advice[] }
+// 经过严格 JSON 校验；任何失败都抛错给调用方，由 UI 保留传统结果。
+
+import type { CastingEvidence } from '../casting/evidence';
+import type { AiReading, CastingResult } from '../domain/types';
 import type { AiProvider } from './aiSettings';
 
 export const DEFAULT_AI_MODELS: Record<AiProvider, string> = {
@@ -13,6 +20,11 @@ export const DEFAULT_AI_URLS: Record<AiProvider, string> = {
   deepseek: 'https://api.deepseek.com'
 };
 
+export interface AiReadingRequest {
+  result: CastingResult;
+  evidences: readonly CastingEvidence[];
+}
+
 interface AiReadingOptions {
   provider: AiProvider;
   apiUrl: string;
@@ -26,12 +38,6 @@ type OpenAiFetch = (
   input: RequestInfo | URL,
   init?: RequestInit
 ) => Promise<Pick<Response, 'ok' | 'status' | 'json' | 'text'>>;
-
-interface AiReadingPatch {
-  headline: string;
-  plainText: string;
-  advice: string[];
-}
 
 interface OpenAiChatCompletionBody {
   choices?: Array<{
@@ -54,11 +60,10 @@ interface AnthropicMessagesBody {
   };
 }
 
-export async function createAiInterpretation(
-  castingResult: CastingResult,
-  tosses: readonly CoinToss[],
+export async function createAiReading(
+  request: AiReadingRequest,
   options: AiReadingOptions
-): Promise<AiInterpretation> {
+): Promise<AiReading> {
   const provider = options.provider;
   const apiKey = options.apiKey.trim();
   const model = options.model.trim() || DEFAULT_AI_MODELS[provider];
@@ -71,7 +76,7 @@ export async function createAiInterpretation(
   const fetcher = options.fetcher ?? fetch;
   const response = await fetcher(
     apiUrl,
-    buildProviderRequest(provider, apiKey, model, castingResult, tosses, options.signal)
+    buildProviderRequest(provider, apiKey, model, request, options.signal)
   );
 
   if (!response.ok) {
@@ -80,14 +85,8 @@ export async function createAiInterpretation(
 
   const body = await response.json();
   const text = extractResponseText(provider, body);
-  const patch = parseAiReadingPatch(text);
 
-  return {
-    ...castingResult,
-    headline: patch.headline,
-    plainText: patch.plainText,
-    advice: patch.advice
-  };
+  return parseAiReading(text);
 }
 
 function normalizeApiUrl(provider: AiProvider, rawUrl: string): string {
@@ -128,10 +127,11 @@ function buildProviderRequest(
   provider: AiProvider,
   apiKey: string,
   model: string,
-  castingResult: CastingResult,
-  tosses: readonly CoinToss[],
+  request: AiReadingRequest,
   signal?: AbortSignal
 ): RequestInit {
+  const payload = JSON.stringify(buildAiPromptPayload(request));
+
   if (provider === 'anthropic') {
     return {
       method: 'POST',
@@ -145,12 +145,7 @@ function buildProviderRequest(
         model,
         max_tokens: 1200,
         system: buildInstructions(),
-        messages: [
-          {
-            role: 'user',
-            content: JSON.stringify(buildPromptPayload(castingResult, tosses))
-          }
-        ]
+        messages: [{ role: 'user', content: payload }]
       })
     };
   }
@@ -165,14 +160,8 @@ function buildProviderRequest(
     body: JSON.stringify({
       model,
       messages: [
-        {
-          role: 'system',
-          content: buildInstructions()
-        },
-        {
-          role: 'user',
-          content: JSON.stringify(buildPromptPayload(castingResult, tosses))
-        }
+        { role: 'system', content: buildInstructions() },
+        { role: 'user', content: payload }
       ],
       response_format: { type: 'json_object' }
     })
@@ -182,46 +171,67 @@ function buildProviderRequest(
 function buildInstructions(): string {
   return [
     '你是一个严谨的《周易》娱乐解读助手。',
-    '只能基于用户给定的问题、本卦、动爻、变卦、卦辞、象辞、爻辞和起卦过程进行白话解读。',
-    '不得编造或改写经典原文，不得声称结果必然发生，不得提供医疗、法律、投资等高风险确定性建议。',
+    '只基于用户给定的问题、六次投掷记录、本卦、动爻、变卦、卦辞、象辞、爻辞与传统依据进行白话解读。',
+    '不得编造或改写经典原文，引用卦辞爻辞时必须保持原文。',
+    '不得声称结果必然发生，不提供医疗、法律、投资等高风险确定性建议。',
+    '不回答与本次起卦无关的请求。',
     '输出中文 JSON，不要 Markdown，不要代码块。',
     'JSON 格式必须为：{"headline": string, "plainText": string, "advice": string[]}。',
     'plainText 用 2 到 4 段话组成，段落之间用换行符。advice 给 3 到 5 条可执行建议。'
   ].join('\n');
 }
 
-function buildPromptPayload(castingResult: CastingResult, tosses: readonly CoinToss[]) {
+const SETTLED_REASON_LABEL: Record<CastingEvidence['settledReason'], string> = {
+  strict: '自然静止',
+  'timeout-readable': '超时判读（物理朝向）'
+};
+
+/** 组装发给 AI 的全部上下文：问题、六次投掷证据、卦象与传统依据。 */
+export function buildAiPromptPayload(request: AiReadingRequest) {
+  const { result, evidences } = request;
+
   return {
-    question: castingResult.question,
-    questionType: castingResult.questionType,
+    question: result.question,
+    questionType: result.questionType,
     originalHexagram: {
-      name: castingResult.originalHexagram.name,
-      judgment: castingResult.originalHexagram.judgment,
-      image: castingResult.originalHexagram.image,
-      keywords: castingResult.originalHexagram.keywords,
-      summary: castingResult.originalHexagram.summary
+      name: result.originalHexagram.name,
+      judgment: result.originalHexagram.judgment,
+      image: result.originalHexagram.image,
+      keywords: result.originalHexagram.keywords,
+      summary: result.originalHexagram.summary
     },
-    movingLines: castingResult.movingLines.map((line) => ({
+    movingLines: result.movingLines.map((line) => ({
+      position: line.position,
       title: line.title,
       original: line.original,
       summary: line.summary,
       tags: line.tags
     })),
-    changedHexagram: castingResult.changedHexagram
+    changedHexagram: result.changedHexagram
       ? {
-          name: castingResult.changedHexagram.name,
-          judgment: castingResult.changedHexagram.judgment,
-          image: castingResult.changedHexagram.image,
-          keywords: castingResult.changedHexagram.keywords,
-          summary: castingResult.changedHexagram.summary
+          name: result.changedHexagram.name,
+          judgment: result.changedHexagram.judgment,
+          image: result.changedHexagram.image,
+          keywords: result.changedHexagram.keywords,
+          summary: result.changedHexagram.summary
         }
       : null,
-    traditionalBasis: castingResult.basis,
-    tosses: tosses.map((toss, index) => ({
-      throw: index + 1,
-      faces: toss.faces,
-      score: toss.score,
-      lineName: toss.line.name
+    traditionalBasis: result.basis,
+    tosses: evidences.map((evidence) => ({
+      throw: evidence.throwIndex,
+      faces: evidence.faces,
+      score: evidence.score,
+      lineName: evidence.lineName,
+      isMoving: evidence.isMoving,
+      input: {
+        source: evidence.inputSource,
+        energy: evidence.inputSummary.energy,
+        durationMs: evidence.inputSummary.durationMs
+      },
+      settlement: {
+        reason: SETTLED_REASON_LABEL[evidence.settledReason],
+        timeMs: evidence.settledTimeMs
+      }
     }))
   };
 }
@@ -249,22 +259,43 @@ function extractResponseText(provider: AiProvider, body: unknown): string {
   throw new Error('AI 没有返回可读取的文本');
 }
 
-function parseAiReadingPatch(text: string): AiReadingPatch {
+/** 严格校验 AI 输出；任何格式问题都抛出可展示的原因。 */
+export function parseAiReading(text: string): AiReading {
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?/i, '')
     .replace(/```$/i, '')
     .trim();
-  const parsed = JSON.parse(cleaned) as Partial<AiReadingPatch>;
 
-  if (!parsed.headline || !parsed.plainText || !Array.isArray(parsed.advice)) {
-    throw new Error('AI 返回格式不完整');
+  let parsed: Partial<AiReading>;
+
+  try {
+    parsed = JSON.parse(cleaned) as Partial<AiReading>;
+  } catch {
+    throw new Error('AI 返回内容不是有效 JSON');
+  }
+
+  const missing: string[] = [];
+  if (typeof parsed.headline !== 'string' || !parsed.headline.trim()) {
+    missing.push('headline');
+  }
+  if (typeof parsed.plainText !== 'string' || !parsed.plainText.trim()) {
+    missing.push('plainText');
+  }
+  if (!Array.isArray(parsed.advice)) {
+    missing.push('advice');
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`AI 返回格式不完整，缺少：${missing.join('、')}`);
   }
 
   return {
-    headline: parsed.headline,
-    plainText: parsed.plainText,
-    advice: parsed.advice.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    headline: (parsed.headline as string).trim(),
+    plainText: (parsed.plainText as string).trim(),
+    advice: (parsed.advice as unknown[]).filter(
+      (item): item is string => typeof item === 'string' && item.trim().length > 0
+    )
   };
 }
 
