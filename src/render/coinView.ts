@@ -8,6 +8,8 @@ import {
   createCoinBodyGeometry,
   createCoinFaceGeometry
 } from '../physics/coinGeometry';
+import { TABLETOP_COIN_RADIUS } from '../physics/coinDimensions';
+import { faceNormalYFromQuaternion } from '../physics/faceReader';
 import type { QuaternionTuple, Vec3Tuple } from '../physics/physicalTossInput';
 import {
   createCoinCapMaterial,
@@ -108,6 +110,9 @@ export function idleCoinPose(
  * Shaking pose while charging: coins tremble around their idle spots with
  * an amplitude driven by chamber energy. Purely visual; the toss itself
  * starts from mapper-produced physical states on release.
+ *
+ * 倾斜会抬高铜钱的垂直占位（半径投影远大于半厚度）：中心高度必须
+ * 补偿到 extent 以上，否则钱缘会穿进桌面（M5 bugfix）。
  */
 export function chargingCoinPose(
   index: number,
@@ -120,12 +125,27 @@ export function chargingCoinPose(
   const phase = elapsedSeconds * (14 + energy * 18) + index * 2.4;
 
   const x = idle.position[0] + Math.sin(phase) * amplitude;
-  const y = idle.position[1] + Math.abs(Math.sin(phase * 1.31)) * amplitude * 0.8;
+  const hop = Math.abs(Math.sin(phase * 1.31)) * amplitude * 0.8;
   const z = idle.position[2] + Math.cos(phase * 0.87) * amplitude * 0.6;
   const tilt = Math.sin(phase * 1.13) * (0.12 + energy * 0.4) * motionScale;
 
+  const rotation: QuaternionTuple = [
+    Math.sin(tilt) * 0.35,
+    0,
+    Math.cos(phase * 0.5) * 0.2,
+    Math.cos(tilt)
+  ];
+
+  // 向上跳而不向下穿：中心高度 = 静止高度 + 上跳量，且永远不低于
+  // 当前倾斜角下的垂直占位（含面片浮雕余量）。
+  const normalY = Math.abs(faceNormalYFromQuaternion(rotation));
+  const verticalExtent =
+    (TABLETOP_COIN_THICKNESS / 2 + COIN_FACE_OFFSET) * normalY +
+    TABLETOP_COIN_RADIUS * Math.sqrt(Math.max(0, 1 - normalY * normalY));
+  const y = Math.max(idle.position[1] + hop, verticalExtent + 0.002);
+
   return {
     position: [x, y, z],
-    rotation: [Math.sin(tilt) * 0.35, 0, Math.cos(phase * 0.5) * 0.2, Math.cos(tilt)]
+    rotation
   };
 }
