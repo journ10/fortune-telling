@@ -43,6 +43,7 @@ export interface CastingMachineState {
 
 export type CastingMachineEvent =
   | { type: 'start-charging' }
+  | { type: 'cancel-charge' }
   | { type: 'release'; input: PhysicalTossInput }
   | { type: 'simulation-started' }
   | { type: 'settled'; settled: SettledToss }
@@ -67,6 +68,17 @@ export function castingMachineReducer(
         return state;
       }
       return { ...state, phase: 'charging', input: null, settled: null };
+
+    case 'cancel-charge':
+      if (state.phase !== 'charging') {
+        return state;
+      }
+      return {
+        ...state,
+        phase: state.throwIndex <= 1 ? 'idle' : 'ready',
+        input: null,
+        settled: null
+      };
 
     case 'release':
       if (state.phase !== 'charging') {

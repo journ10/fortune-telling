@@ -127,6 +127,20 @@ describe('castingMachine', () => {
     expect(castingMachineReducer(state, { type: 'reset' }).phase).toBe('idle');
   });
 
+  it('cancels a charge back to idle or ready', () => {
+    let state = castingMachineReducer(createInitialMachineState(), { type: 'start-charging' });
+    expect(castingMachineReducer(state, { type: 'cancel-charge' }).phase).toBe('idle');
+
+    state = createInitialMachineState();
+    state = castingMachineReducer(state, { type: 'start-charging' });
+    state = castingMachineReducer(state, { type: 'release', input: fakeInput() });
+    state = castingMachineReducer(state, { type: 'simulation-started' });
+    state = castingMachineReducer(state, { type: 'settled', settled: fakeSettled() });
+    state = castingMachineReducer(state, { type: 'line-recorded' });
+    state = castingMachineReducer(state, { type: 'start-charging' });
+    expect(castingMachineReducer(state, { type: 'cancel-charge' }).phase).toBe('ready');
+  });
+
   it('bounds the simulation phase with a protection budget', () => {
     // The physics layer guarantees a settled outcome within its hard cap via
     // the physical timeout-readable path; the machine exposes that budget so
