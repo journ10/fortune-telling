@@ -3,7 +3,7 @@
 :root {
   --ink: #f2e8d8;
   --ink-dim: #b9ab93;
-  --ink-faint: #8a7d67;
+  --ink-faint: #9c8f77;
   --paper: rgba(24, 18, 12, 0.82);
   --paper-solid: #1c150e;
   --edge: rgba(242, 232, 216, 0.14);
@@ -249,6 +249,15 @@ body {
 .formField input:focus,
 .formField select:focus {
   outline: 1px solid var(--accent);
+}
+
+/* 键盘焦点可见：Tab 可辨当前控制。 */
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
 }
 
 .questionActions {

@@ -87,6 +87,12 @@ export default function TabletopView({
     let animationFrame = 0;
     let previousTime = performance.now();
     const startedAt = previousTime;
+    // prefers-reduced-motion：静置不摆动，蓄力仅保留少量姿态反馈。
+    const reducedMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const idleMotionScale = reducedMotion ? 0 : 1;
+    const chargingMotionScale = reducedMotion ? 0.25 : 1;
 
     const loop = (now: number) => {
       animationFrame = window.requestAnimationFrame(loop);
@@ -110,7 +116,7 @@ export default function TabletopView({
         } else if (currentPhase === 'charging') {
           restPoseRef.current = null;
           coins.forEach((coin, index) => {
-            const pose = chargingCoinPose(index, elapsedSeconds, energy);
+            const pose = chargingCoinPose(index, elapsedSeconds, energy, chargingMotionScale);
             coin.setPose(pose.position, pose.rotation);
           });
         } else if (restPoseRef.current) {
@@ -122,7 +128,7 @@ export default function TabletopView({
           });
         } else {
           coins.forEach((coin, index) => {
-            const pose = idleCoinPose(index, elapsedSeconds);
+            const pose = idleCoinPose(index, elapsedSeconds, idleMotionScale);
             coin.setPose(pose.position, pose.rotation);
           });
         }
