@@ -141,5 +141,76 @@ describe('castingSession', () => {
     expect(state.tosses).toHaveLength(0);
     expect(state.evidences).toHaveLength(0);
     expect(state.result).toBeNull();
+    expect(state.aiReading).toBeNull();
+    expect(state.aiError).toBeNull();
+  });
+
+  function castAllSix(state: CastingSessionState): CastingSessionState {
+    let next = state;
+    SIX_LINES.forEach((faces) => {
+      next = castLine(next, faces);
+    });
+    return next;
+  }
+
+  it('carries AI reading through the session without touching the traditional result', () => {
+    let state = castAllSix(createCastingSessionState());
+    expect(state.machine.phase).toBe('result');
+    const result = state.result;
+
+    // reading-started 只能从结果链路进入；起卦中是 no-op。
+    const midCast = castLine(createCastingSessionState(), ['heads', 'heads', 'tails']);
+    expect(castingSessionReducer(midCast, { type: 'reading-started' })).toBe(midCast);
+
+    state = castingSessionReducer(state, { type: 'reading-started' });
+    expect(state.machine.phase).toBe('reading');
+    expect(state.result).toBe(result);
+    expect(state.aiError).toBeNull();
+
+    // 失败：保留传统结果与证据，可重试。
+    state = castingSessionReducer(state, { type: 'reading-failed', message: '网络错误' });
+    expect(state.machine.phase).toBe('reading-error');
+    expect(state.result).toBe(result);
+    expect(state.tosses).toHaveLength(6);
+    expect(state.aiReading).toBeNull();
+    expect(state.aiError).toBe('网络错误');
+
+    state = castingSessionReducer(state, { type: 'reading-started' });
+    expect(state.machine.phase).toBe('reading');
+    expect(state.aiError).toBeNull();
+
+    // 成功：写入解读，传统结果不变。
+    const reading = { headline: 'h', plainText: 'p', advice: ['a'] };
+    state = castingSessionReducer(state, { type: 'reading-finished', reading });
+    expect(state.machine.phase).toBe('reading-ready');
+    expect(state.result).toBe(result);
+    expect(state.aiReading).toEqual(reading);
+    expect(state.aiError).toBeNull();
+
+    // 非法转换不改变状态。
+    expect(castingSessionReducer(state, { type: 'reading-failed', message: 'x' })).toBe(state);
+  });
+
+  it('reset clears AI reading state along with the casting', () => {
+    let state = castAllSix(createCastingSessionState());
+    state = castingSessionReducer(state, { type: 'reading-started' });
+    state = castingSessionReducer(state, { type: 'reading-failed', message: '网络错误' });
+    state = castingSessionReducer(state, { type: 'reset' });
+
+    expect(state.machine.phase).toBe('idle');
+    expect(state.aiReading).toBeNull();
+    expect(state.aiError).toBeNull();
+  });
+
+  it('rejects question changes once a result exists (including during reading)', () => {
+    let state = castAllSix(createCastingSessionState());
+    state = castingSessionReducer(state, { type: 'reading-started' });
+
+    const next = castingSessionReducer(state, {
+      type: 'set-question',
+      question: '换一个问题',
+      questionType: 'wealth'
+    });
+    expect(next).toBe(state);
   });
 });

@@ -24,7 +24,10 @@ export type CastingPhase =
   | 'simulating'
   | 'settled'
   | 'ready'
-  | 'result';
+  | 'result'
+  | 'reading'
+  | 'reading-ready'
+  | 'reading-error';
 
 export const TOTAL_LINES = 6;
 
@@ -48,6 +51,9 @@ export type CastingMachineEvent =
   | { type: 'simulation-started' }
   | { type: 'settled'; settled: SettledToss }
   | { type: 'line-recorded' }
+  | { type: 'reading-started' }
+  | { type: 'reading-finished' }
+  | { type: 'reading-failed' }
   | { type: 'reset' };
 
 export function createInitialMachineState(): CastingMachineState {
@@ -113,5 +119,28 @@ export function castingMachineReducer(
 
     case 'reset':
       return createInitialMachineState();
+
+    case 'reading-started':
+      // AI 解读完全后置：只能从已成卦的结果态进入（失败可重试）。
+      if (
+        state.phase !== 'result' &&
+        state.phase !== 'reading-error' &&
+        state.phase !== 'reading-ready'
+      ) {
+        return state;
+      }
+      return { ...state, phase: 'reading' };
+
+    case 'reading-finished':
+      if (state.phase !== 'reading') {
+        return state;
+      }
+      return { ...state, phase: 'reading-ready' };
+
+    case 'reading-failed':
+      if (state.phase !== 'reading') {
+        return state;
+      }
+      return { ...state, phase: 'reading-error' };
   }
 }

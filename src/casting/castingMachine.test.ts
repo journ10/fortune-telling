@@ -148,4 +148,55 @@ describe('castingMachine', () => {
     expect(SIMULATION_GUARD_MS).toBeGreaterThan(0);
     expect(SIMULATION_GUARD_MS).toBeLessThanOrEqual(12_000);
   });
+
+  it('only enters reading from the result family of phases', () => {
+    const resultState = castingMachineReducer(createInitialMachineState(), {
+      type: 'reading-started'
+    });
+    // idle 不能直接进 reading。
+    expect(resultState.phase).toBe('idle');
+
+    const atResult = { ...createInitialMachineState(), phase: 'result' as const };
+    const reading = castingMachineReducer(atResult, { type: 'reading-started' });
+    expect(reading.phase).toBe('reading');
+
+    // 中途相位一律拒绝。
+    for (const phase of ['charging', 'released', 'simulating', 'settled', 'ready'] as const) {
+      const state = { ...createInitialMachineState(), phase };
+      expect(castingMachineReducer(state, { type: 'reading-started' }).phase).toBe(phase);
+    }
+
+    // 失败/成功后都允许重新发起（重试）。
+    const errorRetry = castingMachineReducer(
+      { ...createInitialMachineState(), phase: 'reading-error' as const },
+      { type: 'reading-started' }
+    );
+    expect(errorRetry.phase).toBe('reading');
+    const readyRetry = castingMachineReducer(
+      { ...createInitialMachineState(), phase: 'reading-ready' as const },
+      { type: 'reading-started' }
+    );
+    expect(readyRetry.phase).toBe('reading');
+  });
+
+  it('resolves reading to reading-ready or reading-error only from reading', () => {
+    const reading = { ...createInitialMachineState(), phase: 'reading' as const };
+
+    expect(castingMachineReducer(reading, { type: 'reading-finished' }).phase).toBe(
+      'reading-ready'
+    );
+    expect(castingMachineReducer(reading, { type: 'reading-failed' }).phase).toBe(
+      'reading-error'
+    );
+
+    // 非 reading 相位忽略完成/失败事件。
+    const atResult = { ...createInitialMachineState(), phase: 'result' as const };
+    expect(castingMachineReducer(atResult, { type: 'reading-finished' }).phase).toBe('result');
+    expect(castingMachineReducer(atResult, { type: 'reading-failed' }).phase).toBe('result');
+  });
+
+  it('reset clears reading phases back to idle', () => {
+    const reading = { ...createInitialMachineState(), phase: 'reading' as const };
+    expect(castingMachineReducer(reading, { type: 'reset' }).phase).toBe('idle');
+  });
 });
