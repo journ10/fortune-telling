@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDeviceMotionTossDetector } from './deviceMotionToss';
+import { createDeviceMotionTossDetector } from './deviceShakeDetector';
 
 describe('createDeviceMotionTossDetector', () => {
   it('enters shaking when magnitude-based motion energy crosses the start threshold', () => {
