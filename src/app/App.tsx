@@ -66,6 +66,7 @@ export default function App() {
         phase={controller.phase}
         physicsReady={controller.physicsReady}
         activeToss={controller.activeToss}
+        activeRattle={controller.activeRattle}
         chargeEnergy={controller.chargeEnergy}
         resetNonce={controller.resetNonce}
         onPointerDown={controller.handlePointerDown}

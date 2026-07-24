@@ -32,8 +32,11 @@ import {
 import type { PhysicalTossInput } from '../physics/physicalTossInput';
 import {
   createCoinTossSimulation,
+  createRattleSimulation,
   initTossPhysics,
   type CoinTossSimulation,
+  type RattleAgitation,
+  type RattleSimulation,
   type SettledToss
 } from '../physics/tossSimulation';
 import type { AiReading, QuestionType } from '../domain/types';
@@ -47,12 +50,20 @@ export interface ActiveToss {
   settledNotified: boolean;
 }
 
+/** 蓄势期间的物理摇钱仿真（M5）：agitation 由输入处理器就地更新，RAF 循环逐帧消费。 */
+export interface ActiveRattle {
+  simulation: RattleSimulation;
+  agitation: RattleAgitation;
+}
+
 export type ChargeSource = 'pointer' | 'keyboard' | 'motion' | null;
 
 export interface CastingController {
   session: CastingSessionState;
   physicsReady: boolean;
   activeToss: ActiveToss | null;
+  /** charging 期间的摇钱仿真；release/cancel/reset 时为 null。 */
+  activeRattle: ActiveRattle | null;
   /** 0..1 live charge energy for HUD + coin jitter. */
   chargeEnergy: number;
   /** Which input path owns the current charge. */
@@ -106,6 +117,7 @@ export function useCastingController(): CastingController {
   );
   const [physicsReady, setPhysicsReady] = useState(false);
   const [activeToss, setActiveToss] = useState<ActiveToss | null>(null);
+  const [activeRattle, setActiveRattle] = useState<ActiveRattle | null>(null);
   const [chargeEnergy, setChargeEnergy] = useState(0);
   const [chargeSource, setChargeSource] = useState<ChargeSource>(null);
   const [resetNonce, setResetNonce] = useState(0);
@@ -113,11 +125,13 @@ export function useCastingController(): CastingController {
   const keyboardRef = useRef(createKeyboardTossTracker());
   const sessionRef = useRef(session);
   const activeTossRef = useRef<ActiveToss | null>(null);
+  const activeRattleRef = useRef<ActiveRattle | null>(null);
   const physicsReadyRef = useRef(false);
   const settleTimerRef = useRef<number | null>(null);
 
   sessionRef.current = session;
   activeTossRef.current = activeToss;
+  activeRattleRef.current = activeRattle;
   physicsReadyRef.current = physicsReady;
 
   useEffect(() => {
@@ -138,9 +152,15 @@ export function useCastingController(): CastingController {
         window.clearTimeout(settleTimerRef.current);
       }
       activeTossRef.current?.simulation.dispose();
+      activeRattleRef.current?.simulation.dispose();
     },
     []
   );
+
+  const disposeRattle = useCallback(() => {
+    activeRattleRef.current?.simulation.dispose();
+    setActiveRattle(null);
+  }, []);
 
   const beginCharge = useCallback((): boolean => {
     const current = sessionRef.current;
@@ -148,10 +168,17 @@ export function useCastingController(): CastingController {
       return false;
     }
     dispatch({ type: 'start-charging' });
+    // 物理摇钱：charging 期间铜钱在围栏内真实跳动；release 时销毁，
+    // 任何时刻只跑一个物理世界。
+    setActiveRattle({
+      simulation: createRattleSimulation(nextPerturbationSeed()),
+      agitation: { x: 0, z: 0, energy: 0 }
+    });
     return true;
   }, []);
 
   const releaseWithInput = useCallback((input: PhysicalTossInput) => {
+    disposeRattle();
     dispatch({ type: 'release', input });
 
     const simulation = createCoinTossSimulation(input);
@@ -159,15 +186,16 @@ export function useCastingController(): CastingController {
     dispatch({ type: 'simulation-started' });
     setChargeEnergy(0);
     setChargeSource(null);
-  }, []);
+  }, [disposeRattle]);
 
   const cancelCharge = useCallback(() => {
+    disposeRattle();
     chamberRef.current = createPointerChamber();
     keyboardRef.current = cancelKeyboardCharge(keyboardRef.current);
     dispatch({ type: 'cancel-charge' });
     setChargeEnergy(0);
     setChargeSource(null);
-  }, []);
+  }, [disposeRattle]);
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -213,6 +241,18 @@ export function useCastingController(): CastingController {
       event.timeStamp
     );
     setChargeEnergy(summary.energy);
+
+    // 摇钱扰动：最近两个采样的指针速度（屏幕系 x→世界 x，y→世界 z）。
+    const rattle = activeRattleRef.current;
+    const samples = chamberRef.current.samples;
+    if (rattle && samples.length >= 2) {
+      const last = samples[samples.length - 1];
+      const previous = samples[samples.length - 2];
+      const dt = Math.max(1, last.timestamp - previous.timestamp) / 1000;
+      rattle.agitation.x = ((last.x - previous.x) / Math.max(rect.width, 1)) / dt;
+      rattle.agitation.z = ((last.y - previous.y) / Math.max(rect.height, 1)) / dt;
+      rattle.agitation.energy = summary.energy;
+    }
   }, []);
 
   const handlePointerUp = useCallback(
@@ -307,7 +347,15 @@ export function useCastingController(): CastingController {
     }
 
     const timer = window.setInterval(() => {
-      setChargeEnergy(summarizeKeyboardEnergy(keyboardRef.current, performance.now()).energy);
+      const summary = summarizeKeyboardEnergy(keyboardRef.current, performance.now());
+      setChargeEnergy(summary.energy);
+      // 键盘无轨迹输入：方向置零，由仿真内部的旋转兜底方向驱动温和扰动。
+      const rattle = activeRattleRef.current;
+      if (rattle) {
+        rattle.agitation.x = 0;
+        rattle.agitation.z = 0;
+        rattle.agitation.energy = summary.energy;
+      }
     }, 90);
 
     return () => window.clearInterval(timer);
@@ -349,7 +397,14 @@ export function useCastingController(): CastingController {
   }, []);
 
   const setExternalEnergy = useCallback((energy: number) => {
-    setChargeEnergy(Math.min(1, Math.max(0, energy)));
+    const clamped = Math.min(1, Math.max(0, energy));
+    setChargeEnergy(clamped);
+    const rattle = activeRattleRef.current;
+    if (rattle) {
+      rattle.agitation.x = 0;
+      rattle.agitation.z = 0;
+      rattle.agitation.energy = clamped;
+    }
   }, []);
 
   const releaseExternalToss = useCallback(
@@ -371,6 +426,7 @@ export function useCastingController(): CastingController {
   }, [beginCharge]);
 
   const resetCasting = useCallback(() => {
+    disposeRattle();
     if (settleTimerRef.current !== null) {
       window.clearTimeout(settleTimerRef.current);
       settleTimerRef.current = null;
@@ -383,12 +439,13 @@ export function useCastingController(): CastingController {
     setChargeSource(null);
     setResetNonce((nonce) => nonce + 1);
     dispatch({ type: 'reset' });
-  }, []);
+  }, [disposeRattle]);
 
   return {
     session,
     physicsReady,
     activeToss,
+    activeRattle,
     chargeEnergy,
     chargeSource,
     resetNonce,

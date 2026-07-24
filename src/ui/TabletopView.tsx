@@ -8,12 +8,13 @@ import type { CastingPhase } from '../casting/castingMachine';
 import { chargingCoinPose, createCoinViews, idleCoinPose, type CoinView } from '../render/coinView';
 import { createTabletopScene, type TabletopSceneHandle } from '../render/scene';
 import type { CoinTossSimulationSnapshot } from '../physics/tossSimulation';
-import type { ActiveToss } from '../app/useCastingController';
+import type { ActiveRattle, ActiveToss } from '../app/useCastingController';
 
 interface TabletopViewProps {
   phase: CastingPhase;
   physicsReady: boolean;
   activeToss: ActiveToss | null;
+  activeRattle: ActiveRattle | null;
   chargeEnergy: number;
   resetNonce: number;
   onPointerDown: (event: React.PointerEvent<HTMLElement>) => void;
@@ -27,6 +28,7 @@ export default function TabletopView({
   phase,
   physicsReady,
   activeToss,
+  activeRattle,
   chargeEnergy,
   resetNonce,
   onPointerDown,
@@ -43,8 +45,8 @@ export default function TabletopView({
   const [webglFailed, setWebglFailed] = useState(false);
 
   // Latest props for the animation loop.
-  const loopStateRef = useRef({ phase, activeToss, chargeEnergy, onSimulationSettled });
-  loopStateRef.current = { phase, activeToss, chargeEnergy, onSimulationSettled };
+  const loopStateRef = useRef({ phase, activeToss, activeRattle, chargeEnergy, onSimulationSettled });
+  loopStateRef.current = { phase, activeToss, activeRattle, chargeEnergy, onSimulationSettled };
 
   useEffect(() => {
     restPoseRef.current = null;
@@ -115,10 +117,23 @@ export default function TabletopView({
           }
         } else if (currentPhase === 'charging') {
           restPoseRef.current = null;
-          coins.forEach((coin, index) => {
-            const pose = chargingCoinPose(index, elapsedSeconds, energy, chargingMotionScale);
-            coin.setPose(pose.position, pose.rotation);
-          });
+          const rattle = loopStateRef.current.activeRattle;
+          if (rattle) {
+            // 物理摇钱：指针/键盘/摇晃输入驱动，围栏+桌面碰撞保证不穿模。
+            const agitation = reducedMotion
+              ? { ...rattle.agitation, energy: rattle.agitation.energy * 0.25 }
+              : rattle.agitation;
+            const snapshot = rattle.simulation.step(deltaSeconds, agitation);
+            snapshot.coins.forEach((coin, index) => {
+              coins[index].setPose(coin.position, coin.rotation);
+            });
+          } else {
+            // 物理未就绪时的回退：程序化姿态（含穿模 clamp）。
+            coins.forEach((coin, index) => {
+              const pose = chargingCoinPose(index, elapsedSeconds, energy, chargingMotionScale);
+              coin.setPose(pose.position, pose.rotation);
+            });
+          }
         } else if (restPoseRef.current) {
           coins.forEach((coin, index) => {
             const rest = restPoseRef.current?.[index];

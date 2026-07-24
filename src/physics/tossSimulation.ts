@@ -341,3 +341,221 @@ export function createCoinTossSimulation(input: PhysicalTossInput): CoinTossSimu
 
   return simulation;
 }
+
+// ---------------------------------------------------------------------------
+// Rattle simulation (M5): physics-driven charging. While the user holds and
+// shakes, three coins rattle on the tabletop inside an invisible fence;
+// pointer shake velocity maps to horizontal impulses. Purely visual/haptic:
+// release still mints a fresh PhysicalTossInput, so the evidence chain,
+// reproducibility, and distribution stats are untouched.
+// ---------------------------------------------------------------------------
+
+export interface RattleAgitation {
+  /** 水平扰动方向（世界系 x/z，无需归一化）；近零时用慢速旋转方向兜底。 */
+  x: number;
+  z: number;
+  /** 0..1 摇动能量。 */
+  energy: number;
+}
+
+export interface RattleSimulation {
+  step: (deltaSeconds: number, agitation: RattleAgitation) => CoinTossSimulationSnapshot;
+  snapshot: () => CoinTossSimulationSnapshot;
+  dispose: () => void;
+}
+
+/** 围栏内边界（不含墙厚）：铜钱始终留在桌面可视范围内。 */
+export const RATTLE_FENCE_X = 1.8;
+export const RATTLE_FENCE_Z = 1.2;
+const RATTLE_WALL_HALF_HEIGHT = 0.3;
+const RATTLE_WALL_THICKNESS = 0.06;
+const RATTLE_HORIZONTAL_IMPULSE = 0.05;
+const RATTLE_VERTICAL_IMPULSE = 0.34;
+// 每个子步的跳起概率（energy=1 时约 11 次/秒），形成随机真实的蹦跳。
+const RATTLE_HOP_CHANCE = 0.16;
+// 摇钱阻尼低于投掷落桌阻尼（2.2/3.2）：让铜钱持续跳动，输入停止后自然平静。
+const RATTLE_LINEAR_DAMPING = 0.9;
+const RATTLE_ANGULAR_DAMPING = 1.6;
+/** 任何情况下铜钱中心不得越过的高度（物理兜底，防能量堆积飞出）。 */
+const RATTLE_MAX_COIN_HEIGHT = 0.6;
+
+export function createRattleSimulation(seed = 1): RattleSimulation {
+  const rapier = rapierModule;
+  if (!rapier) {
+    throw new Error('initTossPhysics() must resolve before createRattleSimulation');
+  }
+
+  const random = createSeededRandom(seed >>> 0);
+  const world = new rapier.World({ x: 0, y: -GRAVITY, z: 0 });
+  world.integrationParameters.maxCcdSubsteps = 3;
+  world.integrationParameters.numSolverIterations = 8;
+
+  world.createCollider(
+    rapier.ColliderDesc.cuboid(TABLE_HALF_X, TABLE_THICKNESS, TABLE_HALF_Z)
+      .setTranslation(0, -TABLE_THICKNESS, 0)
+      .setFriction(TABLE_FRICTION_BASE)
+      .setRestitution(TABLE_RESTITUTION)
+  );
+
+  // 隐形浅围栏：四面墙，防止剧烈摇动把铜钱摇飞。
+  const walls: Array<{ x: number; z: number; hx: number; hz: number }> = [
+    { x: RATTLE_FENCE_X + RATTLE_WALL_THICKNESS, z: 0, hx: RATTLE_WALL_THICKNESS, hz: RATTLE_FENCE_Z + RATTLE_WALL_THICKNESS * 2 },
+    { x: -RATTLE_FENCE_X - RATTLE_WALL_THICKNESS, z: 0, hx: RATTLE_WALL_THICKNESS, hz: RATTLE_FENCE_Z + RATTLE_WALL_THICKNESS * 2 },
+    { x: 0, z: RATTLE_FENCE_Z + RATTLE_WALL_THICKNESS, hx: RATTLE_FENCE_X, hz: RATTLE_WALL_THICKNESS },
+    { x: 0, z: -RATTLE_FENCE_Z - RATTLE_WALL_THICKNESS, hx: RATTLE_FENCE_X, hz: RATTLE_WALL_THICKNESS }
+  ];
+  walls.forEach((wall) => {
+    world.createCollider(
+      rapier.ColliderDesc.cuboid(wall.hx, RATTLE_WALL_HALF_HEIGHT, wall.hz)
+        .setTranslation(wall.x, RATTLE_WALL_HALF_HEIGHT, wall.z)
+        .setFriction(0.3)
+        .setRestitution(0.35)
+    );
+  });
+
+  // 起始姿态与 idleCoinPose 一致（半径 0.92，z 压扁 0.72），保证视觉连续。
+  const bodies = [0, 1, 2].map((index) => {
+    const angle = (index / 3) * Math.PI * 2 - Math.PI / 2;
+    const body = world.createRigidBody(
+      rapier.RigidBodyDesc.dynamic()
+        .setTranslation(
+          Math.cos(angle) * 0.92,
+          TABLETOP_COIN_THICKNESS / 2 + 0.002,
+          Math.sin(angle) * 0.92 * 0.72
+        )
+        .setRotation({ x: 0, y: 0, z: 0, w: 1 })
+        .setLinearDamping(AIRBORNE_DAMPING)
+        .setAngularDamping(AIRBORNE_DAMPING)
+        .setCcdEnabled(true)
+    );
+
+    world.createCollider(
+      rapier.ColliderDesc.cylinder(COLLIDER_HALF_HEIGHT, COLLIDER_RADIUS)
+        .setFriction(COIN_FRICTION_BASE)
+        .setRestitution(COIN_RESTITUTION_BASE)
+        .setDensity(8.5),
+      body
+    );
+
+    return body;
+  });
+
+  let elapsed = 0;
+  let accumulator = 0;
+
+  const snapshot = (): CoinTossSimulationSnapshot => ({
+    coins: bodies.map((body) => ({
+      position: vec3FromRapier(body.translation()),
+      rotation: quaternionFromRapier(body.rotation()),
+      linearVelocity: vec3FromRapier(body.linvel()),
+      angularVelocity: vec3FromRapier(body.angvel())
+    })) as CoinTossSimulationSnapshot['coins'],
+    elapsedSeconds: elapsed,
+    settledToss: null
+  });
+
+  const applyAgitation = (agitation: RattleAgitation): void => {
+    const energy = Math.min(1, Math.max(0, agitation.energy));
+    if (energy <= 0.001) {
+      return;
+    }
+
+    const magnitude = Math.hypot(agitation.x, agitation.z);
+    // 方向近零（键盘/摇晃自动扰动）时用随时间慢转的方向，三枚错相。
+    const fallbackAngle = elapsed * 2.3 + seed * 0.017;
+    const dirX = magnitude > 0.05 ? agitation.x / magnitude : Math.cos(fallbackAngle);
+    const dirZ = magnitude > 0.05 ? agitation.z / magnitude : Math.sin(fallbackAngle);
+
+    bodies.forEach((body, index) => {
+      // 方向由用户摇动输入自然反转；per-coin jitter 避免三枚完全同步。
+      const jitter = 0.7 + random() * 0.6;
+      body.applyImpulse(
+        {
+          x: dirX * RATTLE_HORIZONTAL_IMPULSE * energy * jitter,
+          y: 0,
+          z: dirZ * RATTLE_HORIZONTAL_IMPULSE * energy * jitter
+        },
+        true
+      );
+
+      // 贴地时按概率给跳起冲量（持续小冲量会被重力抵消，且防止空中能量堆积）。
+      const bottomY =
+        body.translation().y - colliderVerticalExtent(quaternionFromRapier(body.rotation()));
+      if (bottomY < 0.05 && random() < energy * RATTLE_HOP_CHANCE) {
+        body.applyImpulse(
+          {
+            x: (random() - 0.5) * 0.06,
+            y: RATTLE_VERTICAL_IMPULSE * energy * (0.6 + random() * 0.8),
+            z: (random() - 0.5) * 0.06
+          },
+          true
+        );
+        // 跳起时给一点翻滚力矩，视觉上更像真钱在钱筒里颠。
+        body.applyTorqueImpulse(
+          {
+            x: (random() - 0.5) * 0.02 * energy,
+            y: (random() - 0.5) * 0.01 * energy,
+            z: (random() - 0.5) * 0.02 * energy
+          },
+          true
+        );
+      }
+    });
+  };
+
+  function updateRattleDamping(bodies: readonly RAPIER.RigidBody[]): void {
+  bodies.forEach((body) => {
+    const bottomY =
+      body.translation().y - colliderVerticalExtent(quaternionFromRapier(body.rotation()));
+    const onTable = bottomY <= TABLE_CONTACT_BOTTOM_CLEARANCE;
+    body.setLinearDamping(onTable ? RATTLE_LINEAR_DAMPING : AIRBORNE_DAMPING);
+    body.setAngularDamping(onTable ? RATTLE_ANGULAR_DAMPING : AIRBORNE_DAMPING);
+  });
+}
+
+/** 物理兜底：围栏失效时也绝不穿桌/飞出。 */
+  const clampCoins = (): void => {
+    bodies.forEach((body) => {
+      const translation = body.translation();
+      const clampedX = Math.max(-RATTLE_FENCE_X, Math.min(RATTLE_FENCE_X, translation.x));
+      const clampedZ = Math.max(-RATTLE_FENCE_Z, Math.min(RATTLE_FENCE_Z, translation.z));
+      const clampedY = Math.min(RATTLE_MAX_COIN_HEIGHT, translation.y);
+
+      if (clampedX !== translation.x || clampedZ !== translation.z || clampedY !== translation.y) {
+        body.setTranslation({ x: clampedX, y: clampedY, z: clampedZ }, true);
+        const velocity = body.linvel();
+        body.setLinvel(
+          {
+            x: clampedX !== translation.x ? 0 : velocity.x,
+            y: clampedY !== translation.y ? Math.min(0, velocity.y) : velocity.y,
+            z: clampedZ !== translation.z ? 0 : velocity.z
+          },
+          true
+        );
+      }
+    });
+  };
+
+  return {
+    step: (deltaSeconds: number, agitation: RattleAgitation) => {
+      accumulator += Math.min(deltaSeconds, MAX_STEP_DELTA_SECONDS);
+
+      while (accumulator >= SETTLEMENT_TIMESTEP) {
+        updateRattleDamping(bodies);
+        applyAgitation(agitation);
+        world.timestep = SETTLEMENT_TIMESTEP;
+        world.step();
+        keepCoinsAboveTable(bodies);
+        clampCoins();
+        elapsed += SETTLEMENT_TIMESTEP;
+        accumulator -= SETTLEMENT_TIMESTEP;
+      }
+
+      return snapshot();
+    },
+    snapshot,
+    dispose: () => {
+      world.free();
+    }
+  };
+}
