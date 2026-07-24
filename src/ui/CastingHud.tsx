@@ -4,6 +4,7 @@
 import type { CastingPhase } from '../casting/castingMachine';
 import { TOTAL_LINES } from '../casting/castingMachine';
 import type { CastingEvidence } from '../casting/evidence';
+import type { ChargeSource } from '../app/useCastingController';
 import type { LineName } from '../domain/types';
 
 const LINE_NAME_LABEL: Record<LineName, string> = {
@@ -22,10 +23,17 @@ interface CastingHudProps {
   throwIndex: number;
   evidences: CastingEvidence[];
   chargeEnergy: number;
+  chargeSource: ChargeSource;
+  motionListening: boolean;
   physicsReady: boolean;
 }
 
-function phaseInstruction(phase: CastingPhase, physicsReady: boolean): string {
+function phaseInstruction(
+  phase: CastingPhase,
+  physicsReady: boolean,
+  chargeSource: ChargeSource,
+  motionListening: boolean
+): string {
   if (!physicsReady) {
     return '物理引擎加载中…';
   }
@@ -33,9 +41,11 @@ function phaseInstruction(phase: CastingPhase, physicsReady: boolean): string {
   switch (phase) {
     case 'idle':
     case 'ready':
-      return '按住桌面摇动铜钱，松手掷出（或按住空格键）';
+      return motionListening
+        ? '摇晃手机开始起卦，或按住桌面拖动'
+        : '按住桌面摇动铜钱，松手掷出（或按住空格键）';
     case 'charging':
-      return '摇动中…松手掷出';
+      return chargeSource === 'motion' ? '摇晃中…静止手机掷出' : '摇动中…松手掷出';
     case 'released':
     case 'simulating':
       return '铜钱落定中…';
@@ -51,6 +61,8 @@ export default function CastingHud({
   throwIndex,
   evidences,
   chargeEnergy,
+  chargeSource,
+  motionListening,
   physicsReady
 }: CastingHudProps) {
   const latest = evidences[evidences.length - 1] ?? null;
@@ -76,7 +88,9 @@ export default function CastingHud({
       </section>
 
       <section className="hudStatus" aria-live="polite">
-        <p className="hudInstruction">{phaseInstruction(phase, physicsReady)}</p>
+        <p className="hudInstruction">
+          {phaseInstruction(phase, physicsReady, chargeSource, motionListening)}
+        </p>
         {phase === 'charging' ? (
           <div
             className="energyMeter"

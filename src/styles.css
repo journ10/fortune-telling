@@ -589,6 +589,47 @@ body {
   justify-content: flex-end;
 }
 
+/* ---------- 摇晃投掷面板 ---------- */
+
+.motionPanel {
+  position: absolute;
+  left: 50%;
+  bottom: 76px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.motionPanel > * {
+  pointer-events: auto;
+}
+
+.motionEnable {
+  min-height: 44px;
+  padding: 10px 22px;
+  letter-spacing: 0.1em;
+}
+
+.motionStatus {
+  margin: 0;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  color: var(--ink-dim);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+}
+
+.motionActive {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
 .srOnly {
   position: absolute;
   width: 1px;
@@ -602,5 +643,86 @@ body {
   .lineVerdict,
   .resultPanel {
     animation: none;
+  }
+}
+
+/* ---------- 移动端（≤560px） ---------- */
+
+@media (max-width: 560px) {
+  .castingHud {
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0));
+  }
+
+  .hudProgress {
+    padding: 8px 10px;
+  }
+
+  .hudCounter {
+    font-size: 14px;
+  }
+
+  .hudInstruction {
+    font-size: 13px;
+    padding: 10px 14px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+
+  .lineVerdict {
+    font-size: 16px;
+  }
+
+  .questionEntry {
+    top: 12px;
+    right: 12px;
+  }
+
+  .questionButton,
+  .ghostButton,
+  .primaryButton {
+    min-height: 44px;
+  }
+
+  .motionPanel {
+    bottom: 88px;
+    width: max-content;
+    max-width: 92vw;
+  }
+
+  /* 结果抽屉改为底部进入，不全屏遮挡桌面 */
+  .resultPanel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: min(74%, 640px);
+    border-left: none;
+    border-top: 1px solid var(--edge);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.5);
+    animation: sheet-in 260ms ease-out;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  @keyframes sheet-in {
+    from {
+      transform: translateY(48px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  .resultTitle {
+    font-size: 22px;
+  }
+
+  .resultReopen {
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0));
   }
 }

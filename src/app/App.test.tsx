@@ -4,12 +4,26 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
+
+function stubCoarsePointerWithMotion(requestPermission?: () => Promise<'granted' | 'denied'>) {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === '(pointer: coarse)',
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined
+  }));
+  vi.stubGlobal(
+    'DeviceMotionEvent',
+    requestPermission ? { requestPermission } : class {}
+  );
+}
 
 async function waitForPhysicsReady() {
   await waitFor(
@@ -70,4 +84,54 @@ describe('App', () => {
 
     expect(await screen.findByText('铜钱落定中…')).toBeInTheDocument();
   }, 20000);
+
+  it('does not offer motion toss on desktop pointers', () => {
+    render(<App />);
+
+    expect(screen.queryByTestId('motion-panel')).not.toBeInTheDocument();
+  });
+
+  it('offers shake casting on touch devices and activates it after permission', async () => {
+    const user = userEvent.setup();
+    stubCoarsePointerWithMotion(() => Promise.resolve('granted'));
+    render(<App />);
+
+    const enable = await screen.findByRole('button', { name: '开启摇晃投掷' });
+    await user.click(enable);
+
+    const panel = await screen.findByTestId('motion-panel');
+    await waitFor(() => {
+      expect(panel).toHaveTextContent('摇晃手机开始，或按住桌面拖动');
+    });
+    // Touch chamber remains available as a parallel path.
+    expect(screen.getByTestId('tabletop-view')).toBeInTheDocument();
+  });
+
+  it('keeps the touch path usable when motion permission is denied', async () => {
+    const user = userEvent.setup();
+    stubCoarsePointerWithMotion(() => Promise.resolve('denied'));
+    render(<App />);
+
+    const enable = await screen.findByRole('button', { name: '开启摇晃投掷' });
+    await user.click(enable);
+
+    expect(await screen.findByText(/权限未开启，可直接按住桌面拖动抛出/)).toBeInTheDocument();
+    // Casting is not blocked: the table and HUD are still there.
+    expect(screen.getByText(/第 1 爻/)).toBeInTheDocument();
+  });
+
+  it('works on touch devices without motion sensors at all', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(pointer: coarse)',
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    }));
+    vi.stubGlobal('DeviceMotionEvent', undefined);
+    render(<App />);
+
+    expect(screen.queryByTestId('motion-panel')).not.toBeInTheDocument();
+    await waitForPhysicsReady();
+    expect(screen.getByText(/按住桌面摇动铜钱/)).toBeInTheDocument();
+  });
 });

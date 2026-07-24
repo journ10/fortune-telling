@@ -13,6 +13,18 @@ export interface TabletopSceneHandle {
   dispose: () => void;
 }
 
+const CAMERA_BASE_POSITION = new THREE.Vector3(0, 3.6, 6.1);
+const CAMERA_TARGET = new THREE.Vector3(0, -0.05, 0);
+
+/**
+ * Narrow viewports need the camera further back so the toss area
+ * (coins spread ±2.4 on x) is never cropped left/right. 390px-wide
+ * portrait gets ~1.9x distance; landscape stays at 1x.
+ */
+export function cameraDistanceScale(aspect: number): number {
+  return Math.min(2.1, Math.max(1, 1.35 / Math.max(aspect, 0.3)));
+}
+
 export function createTabletopScene(canvas: HTMLCanvasElement): TabletopSceneHandle {
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -30,8 +42,8 @@ export function createTabletopScene(canvas: HTMLCanvasElement): TabletopSceneHan
   scene.background = new THREE.Color(0x15100b);
 
   const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 60);
-  camera.position.set(0, 3.6, 6.1);
-  camera.lookAt(0, -0.05, 0);
+  camera.position.copy(CAMERA_BASE_POSITION);
+  camera.lookAt(CAMERA_TARGET);
 
   // Procedural environment for metal reflections (no HDRI asset in M2).
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -76,6 +88,8 @@ export function createTabletopScene(canvas: HTMLCanvasElement): TabletopSceneHan
       const safeWidth = Math.max(1, width);
       const safeHeight = Math.max(1, height);
       camera.aspect = safeWidth / safeHeight;
+      camera.position.copy(CAMERA_BASE_POSITION).multiplyScalar(cameraDistanceScale(camera.aspect));
+      camera.lookAt(CAMERA_TARGET);
       camera.updateProjectionMatrix();
       renderer.setSize(safeWidth, safeHeight, false);
     },

@@ -47,12 +47,16 @@ export interface ActiveToss {
   settledNotified: boolean;
 }
 
+export type ChargeSource = 'pointer' | 'keyboard' | 'motion' | null;
+
 export interface CastingController {
   session: CastingSessionState;
   physicsReady: boolean;
   activeToss: ActiveToss | null;
   /** 0..1 live charge energy for HUD + coin jitter. */
   chargeEnergy: number;
+  /** Which input path owns the current charge. */
+  chargeSource: ChargeSource;
   /** Increments on reset so the view can clear rest poses. */
   resetNonce: number;
   phase: CastingPhase;
@@ -61,6 +65,14 @@ export interface CastingController {
   handlePointerUp: (event: React.PointerEvent<HTMLElement>) => void;
   handlePointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
   notifySimulationSettled: (settled: SettledToss) => void;
+  /** Motion input path (device shake): begin a charge from an external detector. */
+  startExternalCharge: () => boolean;
+  /** Update live energy feedback from an external detector. */
+  setExternalEnergy: (energy: number) => void;
+  /** Release an externally produced PhysicalTossInput into the physics pipeline. */
+  releaseExternalToss: (input: PhysicalTossInput) => void;
+  /** Abort a charge started by an external detector (e.g. discarded weak shake). */
+  cancelExternalCharge: () => void;
   setQuestion: (question: string, questionType: QuestionType) => void;
   resetCasting: () => void;
 }
@@ -89,15 +101,18 @@ export function useCastingController(): CastingController {
   const [physicsReady, setPhysicsReady] = useState(false);
   const [activeToss, setActiveToss] = useState<ActiveToss | null>(null);
   const [chargeEnergy, setChargeEnergy] = useState(0);
+  const [chargeSource, setChargeSource] = useState<ChargeSource>(null);
   const [resetNonce, setResetNonce] = useState(0);
   const chamberRef = useRef(createPointerChamber());
   const keyboardRef = useRef(createKeyboardTossTracker());
   const sessionRef = useRef(session);
   const activeTossRef = useRef<ActiveToss | null>(null);
+  const physicsReadyRef = useRef(false);
   const settleTimerRef = useRef<number | null>(null);
 
   sessionRef.current = session;
   activeTossRef.current = activeToss;
+  physicsReadyRef.current = physicsReady;
 
   useEffect(() => {
     let alive = true;
@@ -123,7 +138,7 @@ export function useCastingController(): CastingController {
 
   const beginCharge = useCallback((): boolean => {
     const current = sessionRef.current;
-    if (!canStartCharging(current.machine) || activeTossRef.current) {
+    if (!physicsReadyRef.current || !canStartCharging(current.machine) || activeTossRef.current) {
       return false;
     }
     dispatch({ type: 'start-charging' });
@@ -137,6 +152,7 @@ export function useCastingController(): CastingController {
     setActiveToss({ input, simulation, settledNotified: false });
     dispatch({ type: 'simulation-started' });
     setChargeEnergy(0);
+    setChargeSource(null);
   }, []);
 
   const cancelCharge = useCallback(() => {
@@ -144,6 +160,7 @@ export function useCastingController(): CastingController {
     keyboardRef.current = cancelKeyboardCharge(keyboardRef.current);
     dispatch({ type: 'cancel-charge' });
     setChargeEnergy(0);
+    setChargeSource(null);
   }, []);
 
   const handlePointerDown = useCallback(
@@ -156,6 +173,7 @@ export function useCastingController(): CastingController {
       }
 
       event.currentTarget.setPointerCapture?.(event.pointerId);
+      setChargeSource('pointer');
       chamberRef.current = beginChamberCharge(
         chamberRef.current,
         event.pointerId,
@@ -239,6 +257,7 @@ export function useCastingController(): CastingController {
       }
 
       event.preventDefault();
+      setChargeSource('keyboard');
       keyboardRef.current = beginKeyboardCharge(
         keyboardRef.current,
         event.key,
@@ -308,6 +327,28 @@ export function useCastingController(): CastingController {
     dispatch({ type: 'set-question', question, questionType });
   }, []);
 
+  const setExternalEnergy = useCallback((energy: number) => {
+    setChargeEnergy(Math.min(1, Math.max(0, energy)));
+  }, []);
+
+  const releaseExternalToss = useCallback(
+    (input: PhysicalTossInput) => {
+      if (sessionRef.current.machine.phase !== 'charging') {
+        return;
+      }
+      releaseWithInput(input);
+    },
+    [releaseWithInput]
+  );
+
+  const startExternalCharge = useCallback((): boolean => {
+    if (!beginCharge()) {
+      return false;
+    }
+    setChargeSource('motion');
+    return true;
+  }, [beginCharge]);
+
   const resetCasting = useCallback(() => {
     if (settleTimerRef.current !== null) {
       window.clearTimeout(settleTimerRef.current);
@@ -318,6 +359,7 @@ export function useCastingController(): CastingController {
     chamberRef.current = createPointerChamber();
     keyboardRef.current = createKeyboardTossTracker();
     setChargeEnergy(0);
+    setChargeSource(null);
     setResetNonce((nonce) => nonce + 1);
     dispatch({ type: 'reset' });
   }, []);
@@ -327,6 +369,7 @@ export function useCastingController(): CastingController {
     physicsReady,
     activeToss,
     chargeEnergy,
+    chargeSource,
     resetNonce,
     phase: session.machine.phase,
     handlePointerDown,
@@ -334,6 +377,10 @@ export function useCastingController(): CastingController {
     handlePointerUp,
     handlePointerCancel,
     notifySimulationSettled,
+    startExternalCharge,
+    setExternalEnergy,
+    releaseExternalToss,
+    cancelExternalCharge: cancelCharge,
     setQuestion,
     resetCasting
   };

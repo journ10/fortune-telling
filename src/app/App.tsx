@@ -5,13 +5,16 @@ import { useEffect, useState } from 'react';
 import { DEFAULT_AI_SETTINGS } from '../ai/aiSettings';
 import AiSettingsPanel from '../ui/AiSettingsPanel';
 import CastingHud from '../ui/CastingHud';
+import MotionTossPanel from '../ui/MotionTossPanel';
 import QuestionEntry from '../ui/QuestionEntry';
 import ResultPanel from '../ui/ResultPanel';
 import TabletopView from '../ui/TabletopView';
 import { useCastingController } from './useCastingController';
+import { useDeviceShake } from './useDeviceShake';
 
 export default function App() {
   const controller = useCastingController();
+  const shake = useDeviceShake(controller);
   const { session } = controller;
   const [aiSettings, setAiSettings] = useState(DEFAULT_AI_SETTINGS);
   const [showAiSettings, setShowAiSettings] = useState(false);
@@ -50,8 +53,21 @@ export default function App() {
         throwIndex={session.machine.throwIndex}
         evidences={session.evidences}
         chargeEnergy={controller.chargeEnergy}
+        chargeSource={controller.chargeSource}
+        motionListening={shake.listening}
         physicsReady={controller.physicsReady}
       />
+
+      {shake.offered ? (
+        <MotionTossPanel
+          permission={shake.permission}
+          listening={shake.listening}
+          charging={controller.phase === 'charging' && controller.chargeSource === 'motion'}
+          readyToRelease={controller.chargeEnergy >= 0.75}
+          chargeEnergy={controller.chargeEnergy}
+          onRequestPermission={shake.requestPermission}
+        />
+      ) : null}
 
       <QuestionEntry
         question={session.question}
