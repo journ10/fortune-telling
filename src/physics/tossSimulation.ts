@@ -9,7 +9,7 @@
 // This module imports no React, three.js, or DOM APIs and runs in plain
 // Node (vitest `node` environment).
 
-import * as RAPIER from '@dimforge/rapier3d-compat';
+import type * as RAPIER from '@dimforge/rapier3d-compat';
 import type { CoinFace } from '../domain/types';
 import { TABLETOP_COIN_RADIUS, TABLETOP_COIN_THICKNESS } from './coinDimensions';
 import { faceNormalYFromQuaternion, readCoinFace } from './faceReader';
@@ -72,11 +72,18 @@ export interface CoinTossSimulation {
   dispose: () => void;
 }
 
+let rapierModule: typeof RAPIER | null = null;
 let rapierInitPromise: Promise<void> | null = null;
 
-/** Must resolve before createCoinTossSimulation is called. */
+/**
+ * Must resolve before createCoinTossSimulation is called.
+ * Rapier（含 WASM）按需动态加载，不进首屏 bundle。
+ */
 export function initTossPhysics(): Promise<void> {
-  rapierInitPromise ??= RAPIER.init();
+  rapierInitPromise ??= import('@dimforge/rapier3d-compat').then((module) => {
+    rapierModule = module;
+    return module.init();
+  });
   return rapierInitPromise;
 }
 
@@ -162,6 +169,11 @@ function sampleBodies(bodies: readonly RAPIER.RigidBody[]): CoinSettlementSample
  * tabletop micro tilt — physical variables, never coin faces.
  */
 export function createCoinTossSimulation(input: PhysicalTossInput): CoinTossSimulation {
+  const rapier = rapierModule;
+  if (!rapier) {
+    throw new Error('initTossPhysics() must resolve before createCoinTossSimulation');
+  }
+
   const random = createSeededRandom(mixSimulationSeed(input));
   const tiltLimit = Math.min(MAX_GRAVITY_TILT, input.perturbationScale * 4);
   const gravity = {
@@ -169,12 +181,12 @@ export function createCoinTossSimulation(input: PhysicalTossInput): CoinTossSimu
     y: -GRAVITY,
     z: randomGaussianOffset(random, tiltLimit)
   };
-  const world = new RAPIER.World(gravity);
+  const world = new rapier.World(gravity);
   world.integrationParameters.maxCcdSubsteps = 3;
   world.integrationParameters.numSolverIterations = 8;
 
   world.createCollider(
-    RAPIER.ColliderDesc.cuboid(TABLE_HALF_X, TABLE_THICKNESS, TABLE_HALF_Z)
+    rapier.ColliderDesc.cuboid(TABLE_HALF_X, TABLE_THICKNESS, TABLE_HALF_Z)
       .setTranslation(0, -TABLE_THICKNESS, 0)
       .setFriction(
         TABLE_FRICTION_BASE + randomGaussianOffset(random, input.perturbationScale * 0.22)
@@ -189,7 +201,7 @@ export function createCoinTossSimulation(input: PhysicalTossInput): CoinTossSimu
     const restitution =
       COIN_RESTITUTION_BASE + randomGaussianOffset(random, input.perturbationScale * 2.2);
     const body = world.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic()
+      rapier.RigidBodyDesc.dynamic()
         .setTranslation(coin.position[0], coin.position[1], coin.position[2])
         .setRotation({
           x: coin.rotation[0],
@@ -209,7 +221,7 @@ export function createCoinTossSimulation(input: PhysicalTossInput): CoinTossSimu
     );
 
     world.createCollider(
-      RAPIER.ColliderDesc.cylinder(COLLIDER_HALF_HEIGHT, COLLIDER_RADIUS)
+      rapier.ColliderDesc.cylinder(COLLIDER_HALF_HEIGHT, COLLIDER_RADIUS)
         .setFriction(Math.max(0.05, friction))
         .setRestitution(Math.min(0.95, Math.max(0, restitution)))
         .setDensity(8.5),
