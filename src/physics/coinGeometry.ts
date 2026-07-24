@@ -60,9 +60,10 @@ const coinBodyUVGenerator = {
     indexB: number,
     indexC: number
   ): THREE.Vector2[] {
+    // u 随 +x 递增：从上方看贴图左右不镜像（M5 bugfix，原为 0.5 - x*scale）。
     const toUV = (index: number): THREE.Vector2 =>
       new THREE.Vector2(
-        0.5 - (vertices[index * 3] / (TABLETOP_COIN_RADIUS * 2)) * COIN_FACE_UV_SCALE,
+        0.5 + (vertices[index * 3] / (TABLETOP_COIN_RADIUS * 2)) * COIN_FACE_UV_SCALE,
         (vertices[index * 3 + 1] / (TABLETOP_COIN_RADIUS * 2)) * COIN_FACE_UV_SCALE + 0.5
       );
     return [toUV(indexA), toUV(indexB), toUV(indexC)];
@@ -127,8 +128,9 @@ export function createCoinFaceGeometry(): THREE.ShapeGeometry {
   for (let i = 0; i < positions.count; i++) {
     const x = positions.getX(i);
     const y = positions.getY(i);
+    // u 随 +x 递增：字面朝上时文字左右不镜像（M5 bugfix，原为 0.5 - x*scale）。
     uvs.push(
-      0.5 - (x / (TABLETOP_COIN_RADIUS * 2)) * COIN_FACE_UV_SCALE,
+      0.5 + (x / (TABLETOP_COIN_RADIUS * 2)) * COIN_FACE_UV_SCALE,
       (y / (TABLETOP_COIN_RADIUS * 2)) * COIN_FACE_UV_SCALE + 0.5
     );
   }
