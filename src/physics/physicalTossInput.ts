@@ -47,6 +47,8 @@ export interface MotionTossSummary {
 export interface KeyboardTossInputParams {
   currentThrow: number;
   perturbationSeed: number;
+  /** Optional key-hold duration; a longer hold builds a slightly stronger (still light) toss. */
+  holdMs?: number;
 }
 
 const MIN_POINTER_ENERGY = 0.32;
@@ -398,7 +400,10 @@ export function createMotionPhysicalTossInput(summary: MotionTossSummary): Physi
 }
 
 export function createKeyboardPhysicalTossInput(params: KeyboardTossInputParams): PhysicalTossInput {
-  const energy = MIN_KEYBOARD_ENERGY;
+  const holdMs = clamp(params.holdMs ?? 180, 0, 3000);
+  // Hold duration shapes energy only; faces still come from the simulation.
+  const energy = clamp(MIN_KEYBOARD_ENERGY + holdMs / 4000, MIN_KEYBOARD_ENERGY, 1.1);
+  const durationMs = Math.max(1, Math.round(holdMs));
 
   return {
     source: 'keyboard',
@@ -407,14 +412,14 @@ export function createKeyboardPhysicalTossInput(params: KeyboardTossInputParams)
       'keyboard',
       params.currentThrow,
       energy,
-      180,
+      durationMs,
       [0.12, 0, -1],
       [160, 90, 240],
       params.perturbationSeed,
       0.045
     ),
     energy,
-    durationMs: 180,
+    durationMs,
     perturbationSeed: params.perturbationSeed >>> 0,
     perturbationScale: 0.045
   };
