@@ -10,6 +10,7 @@ import type { CoinFace } from '../domain/types';
 
 const MIN_DELTA_SECONDS = 1 / 120;
 const MAX_DELTA_SECONDS = 0.08;
+const PHYSICAL_TOSS_SAFETY_TIMEOUT_SECONDS = 10;
 
 type PendingTossKey = string | number | null | undefined;
 
@@ -105,6 +106,14 @@ export function usePhysicalTossSimulation({
       if (nextSnapshot.settled && nextSnapshot.faces && !hasSettled) {
         hasSettled = true;
         onSettledRef.current(nextSnapshot.faces);
+        disposeSimulation();
+        return;
+      }
+
+      if (nextSnapshot.elapsed >= PHYSICAL_TOSS_SAFETY_TIMEOUT_SECONDS && !hasSettled) {
+        hasSettled = true;
+        setSnapshot(null);
+        onErrorRef.current?.(new Error('Coin toss did not settle within the safety timeout'));
         disposeSimulation();
         return;
       }

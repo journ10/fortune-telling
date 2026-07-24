@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
+import type { CoinFace } from '../domain/types';
 import {
   COIN_PHYSICS_ENGINE,
   COIN_PHYSICS_FRICTION_BASE,
@@ -80,6 +81,10 @@ function stepUntilSettled(input = createScenarioPhysicalInput(1, 1)) {
 
   simulation.dispose();
   return snapshot;
+}
+
+function scoreFaces(faces: readonly CoinFace[]): 6 | 7 | 8 | 9 {
+  return faces.reduce<number>((score, face) => score + (face === 'heads' ? 3 : 2), 0) as 6 | 7 | 8 | 9;
 }
 
 function expectLegacyContainedCoins(snapshot: CoinPhysicsSnapshot) {
@@ -232,6 +237,108 @@ describe('coinPhysics', () => {
     expect(total).toBe(72);
     expect(heads).toBeGreaterThan(20);
     expect(heads).toBeLessThan(52);
+  });
+
+  it('does not make normal pointer tosses overwhelmingly settle as three heads', async () => {
+    await initCoinPhysics();
+    let allHeads = 0;
+    let total = 0;
+
+    for (let index = 0; index < 24; index += 1) {
+      const simulation = createCoinPhysicsSimulation(
+        createPointerPhysicalTossInput({
+          currentThrow: (index % 6) + 1,
+          sceneWidth: 720,
+          sceneHeight: 480,
+          perturbationSeed: 0x7100 + index * 0x9e37,
+          samples: [
+            { x: 190 + (index % 6) * 24, y: 300 - (index % 4) * 12, timestamp: 0 },
+            { x: 275 + (index % 5) * 18, y: 235 - (index % 7) * 8, timestamp: 85 },
+            { x: 385 + (index % 8) * 12, y: 175 + (index % 3) * 10, timestamp: 175 }
+          ]
+        })
+      );
+      let snapshot = simulation.snapshot();
+
+      for (let step = 0; step < 900 && !snapshot.settled; step += 1) {
+        snapshot = simulation.step(1 / 60);
+      }
+
+      if (snapshot.faces?.every((face) => face === 'heads')) {
+        allHeads += 1;
+      }
+
+      total += 1;
+      simulation.dispose();
+    }
+
+    expect(total).toBe(24);
+    expect(allHeads).toBeLessThan(9);
+  });
+
+  it('keeps normal pointer line-score distribution near the three-coin shape', async () => {
+    await initCoinPhysics();
+    const scoreCounts: Record<6 | 7 | 8 | 9, number> = {
+      6: 0,
+      7: 0,
+      8: 0,
+      9: 0
+    };
+    let heads = 0;
+    let totalFaces = 0;
+
+    for (let index = 0; index < 48; index += 1) {
+      const drift = index % 12;
+      const curve = index % 5;
+      const simulation = createCoinPhysicsSimulation(
+        createPointerPhysicalTossInput({
+          currentThrow: (index % 6) + 1,
+          sceneWidth: 720,
+          sceneHeight: 480,
+          perturbationSeed: 0x2400beef + index * 0x45d9f3b,
+          samples: [
+            { x: 185 + drift * 18, y: 305 - curve * 13, timestamp: 0 },
+            { x: 265 + drift * 14, y: 242 - (index % 7) * 9, timestamp: 78 + curve * 3 },
+            { x: 355 + drift * 10, y: 178 + (index % 4) * 12, timestamp: 166 + curve * 6 },
+            { x: 430 + drift * 6, y: 144 + (index % 6) * 9, timestamp: 224 + curve * 5 }
+          ]
+        })
+      );
+      let snapshot = simulation.snapshot();
+
+      for (let step = 0; step < 900 && !snapshot.settled; step += 1) {
+        snapshot = simulation.step(1 / 60);
+      }
+
+      expect(snapshot.settled, `sample ${index}`).toBe(true);
+      expect(snapshot.faces, `sample ${index}`).toHaveLength(3);
+
+      const faces = snapshot.faces ?? ['heads', 'heads', 'heads'];
+      const score = scoreFaces(faces);
+      scoreCounts[score] += 1;
+      faces.forEach((face) => {
+        if (face === 'heads') {
+          heads += 1;
+        }
+        totalFaces += 1;
+      });
+
+      simulation.dispose();
+    }
+
+    expect(totalFaces).toBe(144);
+    const distributionMessage = JSON.stringify({ heads, scoreCounts });
+
+    expect(heads, distributionMessage).toBeGreaterThan(54);
+    expect(heads, distributionMessage).toBeLessThan(90);
+    expect(scoreCounts[6], distributionMessage).toBeGreaterThanOrEqual(1);
+    expect(scoreCounts[6]).toBeLessThanOrEqual(14);
+    expect(scoreCounts[9]).toBeGreaterThanOrEqual(1);
+    expect(scoreCounts[9]).toBeLessThanOrEqual(14);
+    expect(scoreCounts[7]).toBeGreaterThanOrEqual(9);
+    expect(scoreCounts[7]).toBeLessThanOrEqual(29);
+    expect(scoreCounts[8]).toBeGreaterThanOrEqual(9);
+    expect(scoreCounts[8]).toBeLessThanOrEqual(29);
   });
 
   it('uses timeout-readable settlement from body rotations instead of generated faces', async () => {

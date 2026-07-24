@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createDeviceMotionTossDetector, type DeviceMotionSample } from '../motion/deviceMotionToss';
+import {
+  createDeviceMotionTossDetector,
+  createMotionPerturbationSeed,
+  type DeviceMotionSample
+} from '../motion/deviceMotionToss';
 import { createMotionPhysicalTossInput, type PhysicalTossInput } from '../physics/physicalTossInput';
 
 interface MotionTossControlProps {
@@ -185,7 +189,7 @@ export default function MotionTossControl({
           peakCount: result.summary.peakCount,
           dominantAcceleration: result.summary.dominantAcceleration,
           rotationBias: result.summary.rotationBias,
-          perturbationSeed: result.summary.digest ^ Math.floor(performance.now())
+          perturbationSeed: createMotionPerturbationSeed()
         })
       );
     }

@@ -82,6 +82,83 @@ describe('physical toss input mapping', () => {
     expect(averagePosition(2, rightBottom) - averagePosition(2, leftTop)).toBeGreaterThan(1.5);
   });
 
+  it('keeps energetic pointer releases below the hard energy cap so gesture differences remain visible', () => {
+    const fastArc = createPointerPhysicalTossInput({
+      currentThrow: 2,
+      samples: [
+        { x: 180, y: 310, timestamp: 0 },
+        { x: 270, y: 250, timestamp: 80 },
+        { x: 410, y: 185, timestamp: 145 },
+        { x: 540, y: 130, timestamp: 205 }
+      ],
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0x1234abcd
+    });
+    const sharperArc = createPointerPhysicalTossInput({
+      currentThrow: 2,
+      samples: [
+        { x: 180, y: 310, timestamp: 0 },
+        { x: 300, y: 190, timestamp: 70 },
+        { x: 250, y: 335, timestamp: 120 },
+        { x: 565, y: 105, timestamp: 205 }
+      ],
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0x1234abcd
+    });
+
+    expect(fastArc.energy).toBeGreaterThan(0.45);
+    expect(sharperArc.energy).toBeGreaterThan(fastArc.energy);
+    expect(fastArc.energy).toBeLessThan(1.45);
+    expect(sharperArc.energy).toBeLessThan(1.45);
+  });
+
+  it('starts pointer toss coins from the visible heads-up tabletop state', () => {
+    const input = createPointerPhysicalTossInput({
+      currentThrow: 1,
+      samples: [
+        { x: 280, y: 260, timestamp: 0 },
+        { x: 340, y: 220, timestamp: 90 },
+        { x: 420, y: 170, timestamp: 180 }
+      ],
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0x99887766
+    });
+
+    expect(
+      input.coins.map((coin) =>
+        coinFaceFromPhysicsRotation(
+          new THREE.Quaternion(
+            coin.rotation[0],
+            coin.rotation[1],
+            coin.rotation[2],
+            coin.rotation[3]
+          ).normalize()
+        )
+      )
+    ).toEqual(['heads', 'heads', 'heads']);
+  });
+
+  it('gives pointer tosses enough flip speed to leave the visible heads-up start state', () => {
+    const input = createPointerPhysicalTossInput({
+      currentThrow: 1,
+      samples: [
+        { x: 280, y: 260, timestamp: 0 },
+        { x: 340, y: 220, timestamp: 90 },
+        { x: 420, y: 170, timestamp: 180 }
+      ],
+      sceneWidth: 720,
+      sceneHeight: 480,
+      perturbationSeed: 0x1122aabb
+    });
+
+    input.coins.forEach((coin) => {
+      expect(Math.abs(coin.angularVelocity[0])).toBeGreaterThanOrEqual(8);
+    });
+  });
+
   it('uses pointer shake trajectory to perturb initial coin rotations', () => {
     const calmArc = createPointerPhysicalTossInput({
       currentThrow: 4,
@@ -140,8 +217,8 @@ describe('physical toss input mapping', () => {
     });
   });
 
-  it('creates balanced initial face orientations across synthetic pointer inputs', () => {
-    const initialFaces = { heads: 0, tails: 0 };
+  it('keeps pointer initial faces visible while still varying initial rotations', () => {
+    const roundedRotations = new Set<string>();
 
     for (let index = 0; index < 80; index += 1) {
       const input = createPointerPhysicalTossInput({
@@ -164,16 +241,12 @@ describe('physical toss input mapping', () => {
           coin.rotation[3]
         ).normalize();
 
-        if (coinFaceFromPhysicsRotation(rotation) === 'heads') {
-          initialFaces.heads += 1;
-        } else {
-          initialFaces.tails += 1;
-        }
+        expect(coinFaceFromPhysicsRotation(rotation)).toBe('heads');
+        roundedRotations.add(coin.rotation.map((value) => value.toFixed(5)).join(','));
       });
     }
 
-    expect(initialFaces.heads).toBeGreaterThan(40);
-    expect(initialFaces.tails).toBeGreaterThan(40);
+    expect(roundedRotations.size).toBeGreaterThan(120);
   });
 
   it('maps motion summaries into the same physical input contract', () => {

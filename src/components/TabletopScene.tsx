@@ -7,8 +7,27 @@ import { usePhysicalTossSimulation } from '../hooks/usePhysicalTossSimulation';
 import type { CoinPhysicsSnapshot } from '../physics/coinPhysics';
 import {
   TABLETOP_COIN_RADIUS,
-  TABLETOP_COIN_THICKNESS
+  TABLETOP_COIN_THICKNESS,
+  createCoinShape,
+  createCoinBodyGeometry,
+  createCoinFaceGeometry,
+  COIN_FACE_OFFSET,
+  COIN_RELIEF_Z
 } from '../physics/coinGeometry';
+import { createFallbackLighting } from '../render/lighting';
+import { createPostProcessing, type PostProcessingSetup } from '../render/postprocessing';
+import {
+  createTableMaterial,
+  generateTablePlaceholderTexture,
+  loadTablePBRMaps,
+  type TablePBRMaps
+} from '../render/tableMaterial';
+import {
+  createCoinMaterial,
+  createCoinEdgeMaterial,
+  loadCoinPBRMaps,
+  type CoinPBRMaps
+} from '../render/coinMaterial';
 import {
   createKeyboardPhysicalTossInput,
   createPointerPhysicalTossInput,
@@ -683,52 +702,6 @@ export function createCoinFaceTexture(face: CoinFace, variant: number): THREE.Ca
   return createTextureFromCanvas(canvas);
 }
 
-export function createCoinShape(): THREE.Shape {
-  const shape = new THREE.Shape();
-  shape.absarc(0, 0, COIN_RADIUS, 0, Math.PI * 2, false);
-
-  const squareHoleSize = 0.135;
-  const squareHole = new THREE.Path();
-  squareHole.moveTo(-squareHoleSize, -squareHoleSize);
-  squareHole.lineTo(squareHoleSize, -squareHoleSize);
-  squareHole.lineTo(squareHoleSize, squareHoleSize);
-  squareHole.lineTo(-squareHoleSize, squareHoleSize);
-  squareHole.lineTo(-squareHoleSize, -squareHoleSize);
-  shape.holes.push(squareHole);
-
-  return shape;
-}
-
-function createCoinBodyGeometry(): THREE.ExtrudeGeometry {
-  const geometry = new THREE.ExtrudeGeometry(createCoinShape(), {
-    depth: COIN_THICKNESS,
-    bevelEnabled: true,
-    bevelSegments: 2,
-    bevelSize: 0.006,
-    bevelThickness: 0.006,
-    curveSegments: 96
-  });
-  geometry.center();
-
-  return geometry;
-}
-
-function createCoinFaceGeometry(): THREE.ShapeGeometry {
-  const geometry = new THREE.ShapeGeometry(createCoinShape(), 96);
-  const positions = geometry.getAttribute('position');
-  const uvs: number[] = [];
-
-  for (let index = 0; index < positions.count; index += 1) {
-    const x = positions.getX(index);
-    const y = positions.getY(index);
-
-    uvs.push(0.5 - x / (COIN_RADIUS * 2), y / (COIN_RADIUS * 2) + 0.5);
-  }
-
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-
-  return geometry;
-}
 
 function createCoinSheetFaceTexture(face: CoinFace, sourceTexture: THREE.Texture): THREE.Texture {
   const texture = sourceTexture.clone();
@@ -742,8 +715,15 @@ function createCoinSheetFaceTexture(face: CoinFace, sourceTexture: THREE.Texture
   return texture;
 }
 
-function createReliefMaterial(face: CoinFace, variant: number): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
+function createReliefMaterial(face: CoinFace, variant: number, maps?: CoinPBRMaps): THREE.MeshPhysicalMaterial {
+  if (maps) {
+    return createCoinMaterial(maps, {
+      opacity: face === 'heads' ? 0.36 : 0.3,
+      clearcoat: 0.1,
+      clearcoatRoughness: 0.4
+    });
+  }
+  return new THREE.MeshPhysicalMaterial({
     color:
       face === 'heads'
         ? variant % 2 === 0
@@ -755,6 +735,8 @@ function createReliefMaterial(face: CoinFace, variant: number): THREE.MeshStanda
     metalness: face === 'heads' ? 0.24 : 0.16,
     opacity: face === 'heads' ? 0.36 : 0.3,
     roughness: face === 'heads' ? 0.92 : 0.95,
+    clearcoat: 0.1,
+    clearcoatRoughness: 0.4,
     transparent: true
   });
 }
@@ -782,8 +764,7 @@ function createReliefBar(
   mesh.position.set(
     x,
     y,
-    outward *
-      (COIN_THICKNESS / 2 + COIN_FACE_TEXTURE_OFFSET + COIN_RELIEF_GAP + COIN_RELIEF_DEPTH / 2)
+    outward * COIN_RELIEF_Z
   );
   mesh.rotation.z = rotation;
 
@@ -799,7 +780,7 @@ function createReliefRing(
   const mesh = new THREE.Mesh(new THREE.TorusGeometry(radius, tubeRadius, 8, 128), material);
 
   mesh.position.z =
-    outward * (COIN_THICKNESS / 2 + COIN_FACE_TEXTURE_OFFSET + COIN_RELIEF_GAP + tubeRadius);
+    outward * COIN_RELIEF_Z;
 
   return markReliefMesh(mesh);
 }
@@ -821,9 +802,9 @@ function addSquareHoleRelief(
   ].forEach((mesh) => group.add(mesh));
 }
 
-function addTraditionalCoinRelief(group: THREE.Group, variant: number): void {
-  const headsMaterial = createReliefMaterial('heads', variant);
-  const tailsMaterial = createReliefMaterial('tails', variant);
+function addTraditionalCoinRelief(group: THREE.Group, variant: number, pbrMaps?: { heads?: CoinPBRMaps; tails?: CoinPBRMaps }): void {
+  const headsMaterial = createReliefMaterial('heads', variant, pbrMaps?.heads);
+  const tailsMaterial = createReliefMaterial('tails', variant, pbrMaps?.tails);
 
   group.add(createReliefRing(0.438, 0.0024, 1, headsMaterial));
   group.add(createReliefRing(0.438, 0.0021, -1, tailsMaterial));
@@ -834,13 +815,21 @@ function addTraditionalCoinRelief(group: THREE.Group, variant: number): void {
 function createCoinFaceMaterial(
   face: CoinFace,
   variant: number,
-  coinTexture?: THREE.Texture
-): THREE.MeshStandardMaterial {
+  coinTexture?: THREE.Texture,
+  pbrMaps?: CoinPBRMaps
+): THREE.MeshPhysicalMaterial {
+  if (pbrMaps) {
+    return createCoinMaterial(pbrMaps, {
+      clearcoat: 0.12,
+      clearcoatRoughness: 0.3,
+      side: THREE.FrontSide
+    });
+  }
   const faceTexture = coinTexture
     ? createCoinSheetFaceTexture(face, coinTexture)
     : createCoinFaceTexture(face, variant);
 
-  return new THREE.MeshStandardMaterial({
+  return new THREE.MeshPhysicalMaterial({
     bumpMap: faceTexture,
     bumpScale: face === 'heads' ? 0.008 : 0.006,
     color: 0xffffff,
@@ -850,6 +839,8 @@ function createCoinFaceMaterial(
     emissiveMap: faceTexture,
     map: faceTexture,
     metalness: face === 'heads' ? 0.08 : 0.05,
+    clearcoat: 0.12,
+    clearcoatRoughness: 0.3,
     polygonOffset: true,
     polygonOffsetFactor: -10,
     polygonOffsetUnits: -10,
@@ -859,42 +850,52 @@ function createCoinFaceMaterial(
   });
 }
 
-export function createCoinGroup(variant: number, coinTexture?: THREE.Texture): THREE.Group {
+export function createCoinGroup(
+  variant: number,
+  coinTexture?: THREE.Texture,
+  pbrMaps?: { heads?: CoinPBRMaps; tails?: CoinPBRMaps }
+): THREE.Group {
   const group = new THREE.Group();
   const edgeTexture = createCoinEdgeTexture(variant);
-  const body = new THREE.Mesh(
-    createCoinBodyGeometry(),
-    [
-      new THREE.MeshStandardMaterial({
+  const bodyMat = pbrMaps?.heads
+    ? createCoinMaterial(pbrMaps.heads)
+    : new THREE.MeshPhysicalMaterial({
         color: variant % 2 === 0 ? 0x513722 : 0x463124,
         metalness: 0.24,
-        roughness: 0.91
-      }),
-      new THREE.MeshStandardMaterial({
+        roughness: 0.91,
+        clearcoat: 0.1,
+        clearcoatRoughness: 0.35
+      });
+  const edgeMat = pbrMaps?.heads
+    ? createCoinEdgeMaterial(pbrMaps.heads)
+    : new THREE.MeshPhysicalMaterial({
         bumpMap: edgeTexture,
         bumpScale: 0.006,
         color: 0xffffff,
         map: edgeTexture,
         metalness: 0.16,
         roughness: 0.96,
+        clearcoat: 0.05,
+        clearcoatRoughness: 0.5,
         userData: {
           greenPatina: 'subtle-speckles',
           patinaPattern: 'mottled-edge'
         }
-      })
-    ]
-  );
+      });
+  const body = new THREE.Mesh(createCoinBodyGeometry(), [bodyMat, edgeMat]);
   const heads = new THREE.Mesh(
     createCoinFaceGeometry(),
-    createCoinFaceMaterial('heads', variant, coinTexture)
+    createCoinFaceMaterial('heads', variant, coinTexture, pbrMaps?.heads)
   );
   const tails = new THREE.Mesh(
     createCoinFaceGeometry(),
-    createCoinFaceMaterial('tails', variant, coinTexture)
+    createCoinFaceMaterial('tails', variant, coinTexture, pbrMaps?.tails)
   );
 
-  heads.position.z = COIN_THICKNESS / 2 + COIN_FACE_TEXTURE_OFFSET;
-  tails.position.z = -COIN_THICKNESS / 2 - COIN_FACE_TEXTURE_OFFSET;
+  // 面片必须浮在挤出体盖子（z=±厚度/2）之上，否则被盖子遮挡，
+  // 可见面退化为 UV 未归一化的挤出盖（ClampToEdge 采样贴图白边 → 纯白饼）。
+  heads.position.z = TABLETOP_COIN_THICKNESS / 2 + COIN_FACE_OFFSET;
+  tails.position.z = -(TABLETOP_COIN_THICKNESS / 2 + COIN_FACE_OFFSET);
   tails.rotation.y = Math.PI;
   heads.renderOrder = 2;
   tails.renderOrder = 2;
@@ -905,7 +906,7 @@ export function createCoinGroup(variant: number, coinTexture?: THREE.Texture): T
     group.add(mesh);
   });
 
-  addTraditionalCoinRelief(group, variant);
+  addTraditionalCoinRelief(group, variant, pbrMaps);
 
   return group;
 }
@@ -983,7 +984,8 @@ export default function TabletopScene({
     let coinGroups: THREE.Group[] = [];
     let coinTexture: THREE.Texture | null = null;
     let tabletopGeometry: THREE.PlaneGeometry | null = null;
-    let tabletopMaterial: THREE.MeshStandardMaterial | null = null;
+    let tabletopMaterial: THREE.MeshPhysicalMaterial | null = null;
+    let postProcessing: PostProcessingSetup | null = null;
     let resizeObserver: ResizeObserver | null = null;
     let resizeRenderer: (() => void) | null = null;
     let isWindowResizeFallback = false;
@@ -1015,6 +1017,7 @@ export default function TabletopScene({
         disposeMaterial(tabletopMaterial);
       }
 
+      postProcessing?.dispose();
       renderer?.dispose();
     };
 
@@ -1027,7 +1030,7 @@ export default function TabletopScene({
         alpha: false,
         preserveDrawingBuffer: true
       });
-      const spawnCoins = (loadedCoinTexture?: THREE.Texture) => {
+      const spawnCoins = (loadedCoinTexture?: THREE.Texture, pbrMaps?: { heads?: CoinPBRMaps; tails?: CoinPBRMaps }) => {
         coinGroups.forEach((coin) => {
           scene.remove(coin);
           disposeObject3D(coin);
@@ -1035,7 +1038,7 @@ export default function TabletopScene({
         coinGroups = [];
 
         FALLBACK_FACES.forEach((face, index) => {
-          const coin = createCoinGroup(index, loadedCoinTexture);
+          const coin = createCoinGroup(index, loadedCoinTexture, pbrMaps);
           const plan = coinPlansRef.current[index];
 
           coinGroups.push(coin);
@@ -1050,15 +1053,38 @@ export default function TabletopScene({
         });
       };
       const activeTabletopGeometry = new THREE.PlaneGeometry(13, 9);
-      loadCoinTextureFromAsset()
-        .then((loadedTexture) => {
+
+      // Try PBR textures first, fallback to old sprite sheet
+      let pendingTablePBRMaps: TablePBRMaps | null = null;
+      Promise.all([
+        loadCoinPBRMaps('coin-heads').catch(() => null),
+        loadCoinPBRMaps('coin-tails').catch(() => null),
+        loadTablePBRMaps().catch(() => null),
+        loadCoinTextureFromAsset().catch(() => null)
+      ])
+        .then(([headsMaps, tailsMaps, tableMaps, loadedTexture]) => {
           if (!isEffectActive) {
-            loadedTexture.dispose();
+            loadedTexture?.dispose();
             return;
           }
 
-          coinTexture = loadedTexture;
-          spawnCoins(loadedTexture);
+          if (headsMaps && tailsMaps) {
+            coinTexture = loadedTexture ?? null;
+            spawnCoins(loadedTexture ?? undefined, { heads: headsMaps, tails: tailsMaps });
+          } else if (loadedTexture) {
+            coinTexture = loadedTexture;
+            spawnCoins(loadedTexture);
+          } else if (isEffectActive && coinGroups.length === 0) {
+            spawnCoins();
+          }
+
+          // Apply PBR table material if loaded
+          if (tableMaps && tabletop) {
+            const newTableMat = createTableMaterial(tableMaps);
+            tabletop.material = newTableMat;
+            disposeMaterial(activeTabletopMaterial);
+            tabletopMaterial = newTableMat;
+          }
         })
         .catch(() => {
           if (isEffectActive && coinGroups.length === 0) {
@@ -1066,22 +1092,20 @@ export default function TabletopScene({
           }
         });
       tabletopGeometry = activeTabletopGeometry;
-      const tabletopTexture = createTabletopTexture();
+      const tabletopTexture = generateTablePlaceholderTexture();
       tabletopTexture.wrapS = THREE.RepeatWrapping;
       tabletopTexture.wrapT = THREE.RepeatWrapping;
       tabletopTexture.repeat.set(1.18, 1);
-      const activeTabletopMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        map: tabletopTexture,
-        metalness: 0.04,
-        roughness: 0.92
-      });
+      const activeTabletopMaterial = createTableMaterial({ albedo: tabletopTexture });
       tabletopMaterial = activeTabletopMaterial;
       const tabletop = new THREE.Mesh(activeTabletopGeometry, activeTabletopMaterial);
+      window.__tabletop = tabletop; // expose for PBR update
 
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.shadowMap.enabled = true;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
       renderer.domElement.setAttribute('aria-hidden', 'true');
       renderer.domElement.style.display = 'block';
       renderer.domElement.style.height = '100%';
@@ -1093,28 +1117,11 @@ export default function TabletopScene({
       tabletop.position.y = 0;
       scene.add(tabletop);
 
-      scene.add(new THREE.AmbientLight(0xfff1dc, 1.28));
+      scene.background = new THREE.Color(0x1a1510);
 
-      const keyLight = new THREE.DirectionalLight(0xffd3a2, 3);
-      keyLight.position.set(-3.2, 5.1, 3.7);
-      keyLight.castShadow = true;
-      keyLight.shadow.mapSize.width = 2048;
-      keyLight.shadow.mapSize.height = 2048;
-      keyLight.shadow.camera.near = 0.5;
-      keyLight.shadow.camera.far = 12;
-      keyLight.shadow.camera.left = -5;
-      keyLight.shadow.camera.right = 5;
-      keyLight.shadow.camera.top = 5;
-      keyLight.shadow.camera.bottom = -5;
-      scene.add(keyLight);
+      createFallbackLighting(scene, renderer);
 
-      const fillLight = new THREE.DirectionalLight(0x9eb9c8, 0.7);
-      fillLight.position.set(3.3, 2.4, -2.9);
-      scene.add(fillLight);
-
-      const rimLight = new THREE.PointLight(0xfff6df, 1.2, 8);
-      rimLight.position.set(2.4, 1.55, -2.8);
-      scene.add(rimLight);
+      postProcessing = createPostProcessing(renderer, scene, camera);
 
       camera.position.set(0, 3.35, 5.05);
       camera.lookAt(0, 0.28, 0);
@@ -1215,7 +1222,11 @@ export default function TabletopScene({
           }
         });
 
-        renderer?.render(scene, camera);
+        if (postProcessing) {
+          postProcessing.composer.render();
+        } else {
+          renderer?.render(scene, camera);
+        }
         animationFrame = window.requestAnimationFrame(renderFrame);
       };
 

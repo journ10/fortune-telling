@@ -43,6 +43,17 @@ const ROTATION_ENERGY_SCALE = 240;
 const FNV_OFFSET = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
 
+export function createMotionPerturbationSeed(): number {
+  const values = new Uint32Array(1);
+
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(values);
+    return values[0] >>> 0;
+  }
+
+  return Date.now() >>> 0;
+}
+
 function finiteMagnitude(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }

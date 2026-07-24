@@ -365,4 +365,48 @@ describe('usePhysicalTossSimulation', () => {
     expect(animationFrames).toHaveLength(0);
     expect(result.current).toBeNull();
   });
+
+  it('aborts a toss that remains unsettled past the physical safety timeout', async () => {
+    const input = createKeyboardPhysicalTossInput({
+      currentThrow: 1,
+      perturbationSeed: 0x88888888
+    });
+    const dispose = vi.fn();
+    const simulation = createSimulation(
+      vi.fn(() =>
+        createSnapshot({
+          elapsed: 10.01,
+          faces: null,
+          settled: false
+        })
+      ),
+      dispose
+    );
+    const onSettled = vi.fn<(settledFaces: [CoinFace, CoinFace, CoinFace]) => void>();
+    const onError = vi.fn<(simulationError: unknown) => void>();
+
+    physicsMock.createCoinPhysicsSimulation.mockReturnValue(simulation);
+
+    const { result } = renderHook(() =>
+      usePhysicalTossSimulation({
+        pendingTossKey: 'keyboard:timeout',
+        input,
+        onSettled,
+        onError
+      })
+    );
+
+    await finishPhysicsInit();
+    runNextAnimationFrame(16);
+
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
+    expect((onError.mock.calls[0][0] as Error).message).toBe(
+      'Coin toss did not settle within the safety timeout'
+    );
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(animationFrames).toHaveLength(0);
+    expect(result.current).toBeNull();
+  });
 });

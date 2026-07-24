@@ -18,12 +18,6 @@ const ANGULAR_SLEEP_SPEED = 0.55;
 const SETTLED_FACE_NORMAL_Y = 0.99;
 const READABLE_AFTER_SECONDS = 5.5;
 const READABLE_FACE_NORMAL_Y = 0.72;
-const EDGE_DESTABILIZE_AFTER_SECONDS = 1.15;
-const EDGE_DESTABILIZE_MAX_CENTER_Y = TABLETOP_COIN_RADIUS * 1.16;
-const EDGE_DESTABILIZE_IMPULSE = 0.08;
-const GAUSSIAN_MAX_SIGMA = 2.4;
-const MICRO_PERTURBATION_END_SECONDS = 1.65;
-const MICRO_PERTURBATION_BASE_IMPULSE = 0.00042;
 const TABLETOP_COLLIDER_FLOOR_CLEARANCE = 0.004;
 const TABLETOP_COLLIDER_MAX_PENETRATION = 0.018;
 const TABLETOP_CORRECTION_LINEAR_DAMPING = 0.94;
@@ -33,14 +27,17 @@ const TABLETOP_AIR_BOX_HALF_Z = 2.7;
 const TABLETOP_AIR_BOX_HALF_Y = 1.65;
 const TABLETOP_AIR_BOX_CENTER_Y = 1.62;
 const TABLETOP_AIR_BOX_WALL_THICKNESS = 0.08;
+const TABLETOP_VISIBLE_HALF_X = 3.85;
+const TABLETOP_VISIBLE_HALF_Z = 2.449;
+const TABLETOP_BOUNDARY_DAMPING = 0.42;
 export const COIN_PHYSICS_COLLIDER_SKIN = 0.012;
 export const COIN_PHYSICS_COLLIDER_RADIUS = TABLETOP_COIN_RADIUS + COIN_PHYSICS_COLLIDER_SKIN;
 export const COIN_PHYSICS_COLLIDER_HALF_HEIGHT =
   TABLETOP_COIN_THICKNESS / 2 + COIN_PHYSICS_COLLIDER_SKIN;
-export const COIN_PHYSICS_FRICTION_BASE = 1.05;
-export const COIN_PHYSICS_FRICTION_VARIATION = 0.04;
-export const COIN_PHYSICS_RESTITUTION_BASE = 0.28;
-export const COIN_PHYSICS_RESTITUTION_VARIATION = 0.015;
+export const COIN_PHYSICS_FRICTION_BASE = 0.55;
+export const COIN_PHYSICS_FRICTION_VARIATION = 0.08;
+export const COIN_PHYSICS_RESTITUTION_BASE = 0.65;
+export const COIN_PHYSICS_RESTITUTION_VARIATION = 0.08;
 const VISUAL_FROM_PHYSICS_ROTATION = new THREE.Quaternion().setFromEuler(
   new THREE.Euler(-Math.PI / 2, 0, 0)
 );
@@ -54,12 +51,6 @@ export interface CoinMaterialProfile {
   restitution: number;
 }
 
-interface MicroPerturbation {
-  axis: THREE.Vector3;
-  frequency: number;
-  impulse: number;
-  phase: number;
-}
 
 export type CoinTossMode = 'drop' | 'chamber';
 export type CoinPhysicsPhase = 'drop' | 'contained' | 'released' | 'settled';
@@ -116,6 +107,8 @@ export function createSeededRandom(seed: number): SeededRandom {
   };
 }
 
+const GAUSSIAN_MAX_SIGMA = 2.4;
+
 export function randomGaussianOffset(
   random: SeededRandom,
   maxMagnitude: number,
@@ -150,27 +143,6 @@ function mixCoinPhysicsSeed(currentThrow: number, requestId: number, tossSeed: n
   });
 
   return seed >>> 0;
-}
-
-function createMicroPerturbation(random: SeededRandom, index: number): MicroPerturbation {
-  const axis = new THREE.Vector3(
-    randomGaussianOffset(random, 1),
-    randomGaussianOffset(random, 0.4),
-    randomGaussianOffset(random, 1)
-  );
-
-  if (axis.lengthSq() < 0.0001) {
-    axis.set(index - 1 || 0.35, 0.2, 0.7);
-  }
-
-  axis.normalize();
-
-  return {
-    axis,
-    frequency: 18 + random() * 12,
-    impulse: MICRO_PERTURBATION_BASE_IMPULSE * (0.75 + random() * 0.5),
-    phase: random() * Math.PI * 2
-  };
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -279,16 +251,49 @@ function keepCoinsAboveTable(bodies: readonly RAPIER.RigidBody[]): void {
   });
 }
 
-function destabilizeCoinsStandingOnEdge(
+function keepCoinsInsideVisibleAirBox(bodies: readonly RAPIER.RigidBody[]): void {
+  bodies.forEach((body) => {
+    const translation = body.translation();
+    const clampedX = clamp(translation.x, -TABLETOP_VISIBLE_HALF_X, TABLETOP_VISIBLE_HALF_X);
+    const clampedZ = clamp(translation.z, -TABLETOP_VISIBLE_HALF_Z, TABLETOP_VISIBLE_HALF_Z);
+    const correctedX = clampedX !== translation.x;
+    const correctedZ = clampedZ !== translation.z;
+
+    if (!correctedX && !correctedZ) {
+      return;
+    }
+
+    body.setTranslation(
+      {
+        x: clampedX,
+        y: translation.y,
+        z: clampedZ
+      },
+      true
+    );
+
+    const linearVelocity = body.linvel();
+    body.setLinvel(
+      {
+        x: correctedX ? -linearVelocity.x * TABLETOP_BOUNDARY_DAMPING : linearVelocity.x,
+        y: linearVelocity.y,
+        z: correctedZ ? -linearVelocity.z * TABLETOP_BOUNDARY_DAMPING : linearVelocity.z
+      },
+      true
+    );
+  });
+}
+
+function applyNaturalEdgeInstability(
   bodies: readonly RAPIER.RigidBody[],
   elapsed: number
 ): void {
-  if (elapsed < EDGE_DESTABILIZE_AFTER_SECONDS) {
+  if (elapsed < 1.15) {
     return;
   }
 
   bodies.forEach((body) => {
-    if (body.translation().y > EDGE_DESTABILIZE_MAX_CENTER_Y) {
+    if (body.translation().y > TABLETOP_COIN_RADIUS * 1.16) {
       return;
     }
 
@@ -307,39 +312,12 @@ function destabilizeCoinsStandingOnEdge(
       return;
     }
 
-    torqueAxis.normalize().multiplyScalar(EDGE_DESTABILIZE_IMPULSE * (1 - normalY));
+    torqueAxis.normalize().multiplyScalar(0.025 * (1 - normalY));
     body.applyTorqueImpulse(
       {
         x: torqueAxis.x,
         y: torqueAxis.y,
         z: torqueAxis.z
-      },
-      true
-    );
-  });
-}
-
-function applyMicroPerturbations(
-  bodies: readonly RAPIER.RigidBody[],
-  perturbations: readonly MicroPerturbation[],
-  elapsed: number
-): void {
-  if (elapsed > MICRO_PERTURBATION_END_SECONDS) {
-    return;
-  }
-
-  const envelope = 1 - elapsed / MICRO_PERTURBATION_END_SECONDS;
-
-  bodies.forEach((body, index) => {
-    const perturbation = perturbations[index];
-    const wave = Math.sin(elapsed * perturbation.frequency + perturbation.phase);
-    const impulse = perturbation.impulse * wave * envelope;
-
-    body.applyTorqueImpulse(
-      {
-        x: perturbation.axis.x * impulse,
-        y: perturbation.axis.y * impulse,
-        z: perturbation.axis.z * impulse
       },
       true
     );
@@ -435,15 +413,13 @@ function createPhysicalCoinPhysicsSimulation(input: PhysicalTossInput): CoinPhys
   world.integrationParameters.numSolverIterations = 8;
   const table = RAPIER.ColliderDesc.cuboid(6.5, 0.04, 4.5)
     .setTranslation(0, -0.04, 0)
-    .setFriction(0.92 + randomGaussianOffset(random, input.perturbationScale * 0.22))
+    .setFriction(0.55 + randomGaussianOffset(random, input.perturbationScale * 0.22))
     .setRestitution(0.1);
   world.createCollider(table);
   createTabletopAirBox(world);
 
-  const microPerturbations: MicroPerturbation[] = [];
-  const bodies = input.coins.map((coin, index) => {
+  const bodies = input.coins.map((coin) => {
     const materialProfile = createCoinMaterialProfile(random);
-    microPerturbations[index] = createMicroPerturbation(random, index);
     const rotation = quaternionFromTuple(coin.rotation);
     const body = world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
@@ -460,8 +436,8 @@ function createPhysicalCoinPhysicsSimulation(input: PhysicalTossInput): CoinPhys
           y: coin.angularVelocity[1],
           z: coin.angularVelocity[2]
         })
-        .setLinearDamping(0.2)
-        .setAngularDamping(0.16)
+        .setLinearDamping(0.05)
+        .setAngularDamping(0.05)
         .setCcdEnabled(true)
     );
 
@@ -469,7 +445,7 @@ function createPhysicalCoinPhysicsSimulation(input: PhysicalTossInput): CoinPhys
       RAPIER.ColliderDesc.cylinder(COIN_PHYSICS_COLLIDER_HALF_HEIGHT, COIN_PHYSICS_COLLIDER_RADIUS)
         .setFriction(materialProfile.friction)
         .setRestitution(materialProfile.restitution)
-        .setDensity(6.2),
+        .setDensity(8.5),
       body
     );
 
@@ -549,8 +525,8 @@ function createPhysicalCoinPhysicsSimulation(input: PhysicalTossInput): CoinPhys
         world.timestep = WORLD_TIMESTEP;
         world.step();
         keepCoinsAboveTable(bodies);
-        applyMicroPerturbations(bodies, microPerturbations, elapsed);
-        destabilizeCoinsStandingOnEdge(bodies, elapsed);
+        keepCoinsInsideVisibleAirBox(bodies);
+        applyNaturalEdgeInstability(bodies, elapsed);
         elapsed += WORLD_TIMESTEP;
         accumulator -= WORLD_TIMESTEP;
         settledFaces = detectSettledFaces();

@@ -53,7 +53,7 @@ const MIN_POINTER_ENERGY = 0.32;
 const MIN_KEYBOARD_ENERGY = 0.38;
 const MAX_ENERGY = 1.45;
 const POINTER_SCENE_X_RANGE = 4.8;
-const POINTER_SCENE_Z_RANGE = 3.1;
+const POINTER_SCENE_Z_RANGE = 2.8;
 const POINTER_TRAJECTORY_SAMPLE_LIMIT = 64;
 const DEFAULT_COIN_ORIGIN: Vec3Tuple = [0, 0, -0.16];
 
@@ -139,7 +139,7 @@ function multiplyQuaternions(left: QuaternionTuple, right: QuaternionTuple): Qua
 }
 
 function createInitialCoinRotation(random: () => number, slot: number): QuaternionTuple {
-  const faceFlip = random() >= 0.5 ? 0 : Math.PI;
+  const faceFlip = 0;
   const yaw = random() * Math.PI * 2;
   const tiltX = (random() - 0.5) * 0.42;
   const tiltZ = (random() - 0.5) * 0.42 + slot * 0.21;
@@ -276,8 +276,9 @@ function createCoinStates(
     const positionJitterScale = source === 'pointer' ? 0.35 : 1;
     const rawAngularVelocityX =
       spinBias[0] * (0.018 + energy * 0.012) + slot * (2.2 + energy) + jitter() * 6;
+    const minimumPointerFlipSpeed = 8 + energy * 1.8 + random() * 5.5;
     const pointerAngularVelocityX =
-      (random() >= 0.5 ? 1 : -1) * Math.max(Math.abs(rawAngularVelocityX), 0.75 + energy * 2);
+      (random() >= 0.5 ? 1 : -1) * Math.max(Math.abs(rawAngularVelocityX), minimumPointerFlipSpeed);
     const rotation = createInitialCoinRotation(random, slot);
     const angularVelocity: Vec3Tuple = [
       source === 'pointer' ? pointerAngularVelocityX : rawAngularVelocityX,
@@ -295,7 +296,8 @@ function createCoinStates(
       linearVelocity: [
         safeDirection[0] * (0.74 + energy * 1.28) + slot * 0.12 + jitter(),
         1.04 + energy * 1.72 + random() * 0.16,
-        safeDirection[2] * (0.74 + energy * 1.28) + jitter()
+        safeDirection[2] * (0.74 + energy * 1.28) * (source === 'pointer' ? 0.78 : 1) +
+          jitter()
       ],
       angularVelocity: ensureMinimumAngularVelocity(angularVelocity)
     };
@@ -308,6 +310,8 @@ export function createPointerPhysicalTossInput(params: PointerTossInputParams): 
   const first = samples[0];
   const last = samples[samples.length - 1] ?? first;
   const previous = samples[Math.max(0, samples.length - 2)] ?? first;
+  const safeWidth = Math.max(params.sceneWidth, 1);
+  const safeHeight = Math.max(params.sceneHeight, 1);
   const trajectoryProfile = createPointerTrajectoryProfile(
     trajectorySamples,
     params.sceneWidth,
@@ -315,28 +319,29 @@ export function createPointerPhysicalTossInput(params: PointerTossInputParams): 
   );
   const durationMs = Math.max(1, (last?.timestamp ?? 0) - (first?.timestamp ?? 0));
   const deltaMs = Math.max(1, (last?.timestamp ?? 0) - (previous?.timestamp ?? 0));
-  const velocityX = ((last?.x ?? 0) - (previous?.x ?? 0)) / deltaMs;
-  const velocityY = ((last?.y ?? 0) - (previous?.y ?? 0)) / deltaMs;
-  const pathX = ((last?.x ?? 0) - (first?.x ?? 0)) / Math.max(params.sceneWidth, 1);
-  const pathY = ((last?.y ?? 0) - (first?.y ?? 0)) / Math.max(params.sceneHeight, 1);
+  const releaseSeconds = deltaMs / 1000;
+  const velocityX = (((last?.x ?? 0) - (previous?.x ?? 0)) / safeWidth) / releaseSeconds;
+  const velocityY = (((last?.y ?? 0) - (previous?.y ?? 0)) / safeHeight) / releaseSeconds;
+  const pathX = ((last?.x ?? 0) - (first?.x ?? 0)) / safeWidth;
+  const pathY = ((last?.y ?? 0) - (first?.y ?? 0)) / safeHeight;
   const speed = Math.hypot(velocityX, velocityY);
   const shakeEnergy =
     trajectoryProfile.totalDistance * 0.34 +
     trajectoryProfile.turnEnergy * 0.014 +
     trajectoryProfile.accelerationEnergy * 0.026;
   const energy = clamp(
-    speed * 0.72 + durationMs / 1800 + shakeEnergy,
+    Math.log1p(speed) * 0.24 + durationMs / 2200 + shakeEnergy,
     MIN_POINTER_ENERGY,
     MAX_ENERGY
   );
   const direction = normalizeVector([pathX, 0, pathY], [velocityX, 0, velocityY || -1]);
   const spinBias: Vec3Tuple = [
-    velocityY * 850 + trajectoryProfile.turnEnergy * 48,
-    velocityX * 560 + trajectoryProfile.accelerationEnergy * 32,
-    (velocityX - velocityY) * 420 + trajectoryProfile.totalDistance * 120
+    velocityY * 78 + trajectoryProfile.turnEnergy * 28,
+    velocityX * 58 + trajectoryProfile.accelerationEnergy * 22,
+    (velocityX - velocityY) * 42 + trajectoryProfile.totalDistance * 120
   ];
   const perturbationScale = clamp(
-    0.035 + speed * 0.018 + shakeEnergy * 0.012,
+    0.032 + Math.log1p(speed) * 0.006 + shakeEnergy * 0.01,
     0.035,
     0.09
   );

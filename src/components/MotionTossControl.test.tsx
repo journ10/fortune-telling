@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createMotionPerturbationSeed } from '../motion/deviceMotionToss';
 import MotionTossControl from './MotionTossControl';
 
 type PermissionResponse = 'granted' | 'denied' | 'prompt';
@@ -60,6 +61,19 @@ describe('MotionTossControl', () => {
 
     expect(screen.getByRole('dialog', { name: '手机体感投掷' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '启用体感投掷' })).toBeInTheDocument();
+  });
+
+  it('uses crypto entropy for motion perturbation seeds when available', () => {
+    const getRandomValues = vi.fn((array: Uint32Array) => {
+      array[0] = 0x12345678;
+      return array;
+    });
+    const now = vi.spyOn(performance, 'now').mockReturnValue(0xabcdef);
+    vi.stubGlobal('crypto', { getRandomValues });
+
+    expect(createMotionPerturbationSeed()).toBe(0x12345678);
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+    expect(now).not.toHaveBeenCalled();
   });
 
   it('returns null when casting is not active', () => {
