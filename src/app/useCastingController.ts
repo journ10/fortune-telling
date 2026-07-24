@@ -31,6 +31,7 @@ import {
 } from '../input/pointerChamber';
 import type { PhysicalTossInput } from '../physics/physicalTossInput';
 import {
+  applyRattleHandoff,
   createCoinTossSimulation,
   createRattleSimulation,
   initTossPhysics,
@@ -178,11 +179,15 @@ export function useCastingController(): CastingController {
   }, []);
 
   const releaseWithInput = useCallback((input: PhysicalTossInput) => {
+    // 位姿接力：铜钱当前位置/朝向来自摇钱世界末态，速度仍由 mapper 决定，
+    // 松手瞬间不再有视觉跳变；无 rattle（异常路径）保持原行为。
+    const rattle = activeRattleRef.current;
+    const handoffInput = rattle ? applyRattleHandoff(input, rattle.simulation.snapshot()) : input;
     disposeRattle();
-    dispatch({ type: 'release', input });
+    dispatch({ type: 'release', input: handoffInput });
 
-    const simulation = createCoinTossSimulation(input);
-    setActiveToss({ input, simulation, settledNotified: false });
+    const simulation = createCoinTossSimulation(handoffInput);
+    setActiveToss({ input: handoffInput, simulation, settledNotified: false });
     dispatch({ type: 'simulation-started' });
     setChargeEnergy(0);
     setChargeSource(null);
