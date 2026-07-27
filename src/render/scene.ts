@@ -1,9 +1,11 @@
-// Tabletop scene: renderer, camera, lights, and the table itself.
-// The scene only renders; it never learns about casting results.
+// Tabletop scene: renderer, camera, lights, and the ritual space itself —
+// low lacquer table, woven mat, bamboo coin tube, backdrop wall, dust in
+// the light beam. The scene only renders; it never learns about results.
 
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { createTableMaterial, disposePbrMaterial } from './materials';
+import { createBackdropWall, createCoinTube, createDustMotes, createWovenMat } from './props';
 
 export interface TabletopSceneHandle {
   scene: THREE.Scene;
@@ -13,7 +15,7 @@ export interface TabletopSceneHandle {
   dispose: () => void;
 }
 
-const CAMERA_BASE_POSITION = new THREE.Vector3(0, 3.6, 6.1);
+const CAMERA_BASE_POSITION = new THREE.Vector3(0, 3.3, 6.4);
 const CAMERA_TARGET = new THREE.Vector3(0, -0.05, 0);
 
 /**
@@ -33,13 +35,15 @@ export function createTabletopScene(canvas: HTMLCanvasElement): TabletopSceneHan
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 0.88;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x15100b);
+  scene.background = new THREE.Color(0x0d0a07);
+  // 远景雾深：桌缘与墙面沉进夜色，视觉重心收拢到投掷区
+  scene.fog = new THREE.Fog(0x0d0a07, 8, 22);
 
   const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 60);
   camera.position.copy(CAMERA_BASE_POSITION);
@@ -50,38 +54,59 @@ export function createTabletopScene(canvas: HTMLCanvasElement): TabletopSceneHan
   const roomEnvironment = new RoomEnvironment();
   const envMap = pmrem.fromScene(roomEnvironment, 0.04).texture;
   scene.environment = envMap;
+  scene.environmentIntensity = 0.3;
   pmrem.dispose();
   roomEnvironment.dispose();
 
-  const ambient = new THREE.AmbientLight(0xfff1de, 0.32);
+  // 暖色低调照明：环境光压暗，聚光池收拢视觉，冷补光勾勒钱缘
+  const ambient = new THREE.AmbientLight(0xffe2c4, 0.2);
   scene.add(ambient);
 
-  const keyLight = new THREE.DirectionalLight(0xffeed6, 1.7);
+  // 聚光池：戏剧化单光源，铜钱是舞台上唯一被照亮的主角。
+  // 同时接管阴影（方向光不再投影，省一份 shadow map 开销）。
+  // 缓慢微弱的强度呼吸，像一盏真实的灯。
+  const SPOT_BASE_INTENSITY = 150;
+  const spotLight = new THREE.SpotLight(0xffd9a0, SPOT_BASE_INTENSITY, 24, Math.PI / 5.6, 0.55, 1.8);
+  spotLight.position.set(1.5, 6.8, 2.4);
+  spotLight.target.position.set(0, 0, 0);
+  spotLight.castShadow = true;
+  spotLight.shadow.mapSize.set(2048, 2048);
+  spotLight.shadow.camera.near = 1;
+  spotLight.shadow.camera.far = 16;
+  spotLight.shadow.bias = -0.0004;
+  scene.add(spotLight, spotLight.target);
+
+  const keyLight = new THREE.DirectionalLight(0xffdfae, 1.1);
   keyLight.position.set(2.6, 4.8, 3.2);
-  keyLight.castShadow = true;
-  keyLight.shadow.mapSize.set(2048, 2048);
-  keyLight.shadow.camera.near = 0.5;
-  keyLight.shadow.camera.far = 14;
-  keyLight.shadow.camera.left = -5;
-  keyLight.shadow.camera.right = 5;
-  keyLight.shadow.camera.top = 5;
-  keyLight.shadow.camera.bottom = -5;
-  keyLight.shadow.bias = -0.0004;
   scene.add(keyLight);
 
-  const fillLight = new THREE.DirectionalLight(0xcfdcec, 0.5);
+  const fillLight = new THREE.DirectionalLight(0xcfdcec, 0.22);
   fillLight.position.set(-3.2, 2.4, -2.2);
   scene.add(fillLight);
 
-  const table = new THREE.Mesh(new THREE.BoxGeometry(18, 0.24, 12), createTableMaterial());
+  // 空间：矮桌承载，蒲席定场域，钱筒立于一角，暖墙与雾收纵深
+  const table = new THREE.Mesh(new THREE.BoxGeometry(13, 0.24, 9), createTableMaterial());
   table.position.y = -0.12;
   table.receiveShadow = true;
-  scene.add(table);
+
+  const mat = createWovenMat();
+  const backdrop = createBackdropWall();
+  const coinTube = createCoinTube();
+  const dust = createDustMotes();
+
+  scene.add(table, mat, backdrop, coinTube, dust.points);
+
+  const clock = new THREE.Clock();
 
   const handle: TabletopSceneHandle = {
     scene,
     camera,
     render: () => {
+      const elapsed = clock.getElapsedTime();
+      dust.update(elapsed);
+      // 烛光呼吸：双频正弦叠加，±3%，慢到几乎察觉不到
+      spotLight.intensity =
+        SPOT_BASE_INTENSITY * (1 + 0.03 * Math.sin(elapsed * 6.7) * Math.sin(elapsed * 1.9));
       renderer.render(scene, camera);
     },
     resize: (width, height) => {
@@ -96,7 +121,15 @@ export function createTabletopScene(canvas: HTMLCanvasElement): TabletopSceneHan
     dispose: () => {
       envMap.dispose();
       table.geometry.dispose();
+      mat.geometry.dispose();
       disposePbrMaterial(table.material as THREE.MeshStandardMaterial);
+      (mat.material as THREE.MeshStandardMaterial).map?.dispose();
+      (mat.material as THREE.MeshStandardMaterial).bumpMap?.dispose();
+      (mat.material as THREE.MeshStandardMaterial).dispose();
+      (backdrop.material as THREE.MeshBasicMaterial).map?.dispose();
+      backdrop.geometry.dispose();
+      (backdrop.material as THREE.MeshBasicMaterial).dispose();
+      dust.dispose();
       renderer.dispose();
     }
   };

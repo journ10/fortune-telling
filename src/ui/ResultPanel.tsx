@@ -37,7 +37,7 @@ function AiReadingSection({
   if (aiStatus.kind === 'unconfigured') {
     return (
       <section className="resultSection aiReading" data-testid="ai-unconfigured">
-        <h3>AI 解读（可选）</h3>
+        <h3 data-en="AI Reading · Optional">AI 解读（可选）</h3>
         <p className="mutedText">
           传统结果已完整可用。如需 AI 白话解读，请先配置 AI 服务。
         </p>
@@ -53,7 +53,7 @@ function AiReadingSection({
   if (aiStatus.kind === 'reading') {
     return (
       <section className="resultSection aiReading" data-testid="ai-reading" aria-live="polite">
-        <h3>AI 解读</h3>
+        <h3 data-en="AI Reading">AI 解读</h3>
         <p className="mutedText">AI 解读生成中…传统结果不受影响。</p>
       </section>
     );
@@ -62,7 +62,7 @@ function AiReadingSection({
   if (aiStatus.kind === 'error') {
     return (
       <section className="resultSection aiReading" data-testid="ai-error" role="alert">
-        <h3>AI 解读</h3>
+        <h3 data-en="AI Reading">AI 解读</h3>
         <p className="mutedText">AI 解读失败：{aiStatus.message}</p>
         <p className="mutedText">传统结果完整保留，可重试或检查 AI 配置。</p>
         <div className="aiErrorActions">
@@ -85,7 +85,7 @@ function AiReadingSection({
     <section className="resultSection aiReading" data-testid="ai-ready">
       <details open>
         <summary>
-          <h3>AI 解读 · {aiStatus.reading.headline}</h3>
+          <h3 data-en="AI Reading">AI 解读 · {aiStatus.reading.headline}</h3>
         </summary>
         {aiStatus.reading.plainText.split(/\n+/).map((paragraph) => (
           <p key={paragraph}>{paragraph}</p>
@@ -122,21 +122,28 @@ export default function ResultPanel({
   }));
 
   return (
-    <aside className="resultPanel" role="dialog" aria-label="起卦结果">
-      <header className="resultHeader">
-        <div>
-          <p className="resultEyebrow">{result.question ? `所问：${result.question}` : '六爻已成'}</p>
-          <h2 className="resultTitle">
-            {result.originalHexagram.name}
-            <span className="resultSubtitle">
-              {result.originalHexagram.upperTrigram}上{result.originalHexagram.lowerTrigram}下
-            </span>
-          </h2>
-        </div>
-        <button type="button" className="ghostButton" onClick={onClose} aria-label="收起结果">
-          收起
-        </button>
-      </header>
+    <>
+      <div className="resultBackdrop" role="presentation" onClick={onClose} />
+      <aside className="resultPanel" role="dialog" aria-label="起卦结果">
+        <header className="resultHeader">
+          <div>
+            <p className="resultEyebrow">
+              <span className="resultEyebrowEn" aria-hidden="true">
+                Divination Slip
+              </span>
+              {result.question ? `所问：${result.question}` : '六爻已成'}
+            </p>
+            <h2 className="resultTitle">
+              {result.originalHexagram.name}
+              <span className="resultSubtitle">
+                {result.originalHexagram.upperTrigram}上{result.originalHexagram.lowerTrigram}下
+              </span>
+            </h2>
+          </div>
+          <button type="button" className="ghostButton" onClick={onClose} aria-label="收起结果">
+            收起
+          </button>
+        </header>
 
       <div className="resultBody">
         <section className="resultSection resultHero">
@@ -155,7 +162,7 @@ export default function ResultPanel({
 
         {result.movingLines.length > 0 ? (
           <section className="resultSection">
-            <h3>动爻</h3>
+            <h3 data-en="Moving Lines">动爻</h3>
             <ul className="movingLineList">
               {result.movingLines.map((line) => (
                 <li key={line.position}>
@@ -167,14 +174,14 @@ export default function ResultPanel({
           </section>
         ) : (
           <section className="resultSection">
-            <h3>动爻</h3>
+            <h3 data-en="Moving Lines">动爻</h3>
             <p className="mutedText">本卦六爻安静，无动爻。</p>
           </section>
         )}
 
         {result.changedHexagram ? (
           <section className="resultSection resultChanged">
-            <h3>
+            <h3 data-en="Changed Hexagram">
               变卦 · {result.changedHexagram.name}
               <span className="resultSubtitle">
                 {result.changedHexagram.upperTrigram}上{result.changedHexagram.lowerTrigram}下
@@ -186,7 +193,7 @@ export default function ResultPanel({
         ) : null}
 
         <section className="resultSection">
-          <h3>传统依据</h3>
+          <h3 data-en="Classical Basis">传统依据</h3>
           <ul className="basisList">
             {result.basis.map((basis) => (
               <li key={basis}>{basis}</li>
@@ -195,7 +202,7 @@ export default function ResultPanel({
         </section>
 
         <section className="resultSection">
-          <h3>投掷证据</h3>
+          <h3 data-en="Toss Evidence">投掷证据</h3>
           <EvidencePanel evidences={evidences} />
         </section>
 
@@ -211,6 +218,7 @@ export default function ResultPanel({
           重新起卦
         </button>
       </footer>
-    </aside>
+      </aside>
+    </>
   );
 }

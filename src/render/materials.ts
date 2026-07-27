@@ -34,27 +34,48 @@ function repeatTable(texture: THREE.Texture): THREE.Texture {
 /** 释放材质及其全部 PBR 贴图槽位。 */
 export function disposePbrMaterial(material: THREE.MeshStandardMaterial): void {
   material.map?.dispose();
+  material.alphaMap?.dispose();
   material.normalMap?.dispose();
   material.roughnessMap?.dispose();
   material.metalnessMap?.dispose();
   material.aoMap?.dispose();
+  material.displacementMap?.dispose();
   material.dispose();
 }
 
 /**
- * Coin face material: real PBR set per face (heads 有年号字，tails 素背)。
+ * 位移浮雕面材质：albedo/normal/roughness/metalness/ao 全套 PBR +
+ * 高度图位移（字口真实起伏）+ mask 裁切钱体圆与方孔。
  * metalness/roughness 标量置 1，由贴图通道承载变化。
  */
-export function createCoinFaceMaterial(face: CoinFace): THREE.MeshStandardMaterial {
+export function createCoinReliefMaterial(face: CoinFace): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
     map: loadPbrTexture(`coin-${face}-albedo.png`, { srgb: true }),
+    alphaMap: loadPbrTexture(`coin-${face}-mask.png`),
     normalMap: loadPbrTexture(`coin-${face}-normal.png`),
     roughnessMap: loadPbrTexture(`coin-${face}-roughness.png`),
     metalnessMap: loadPbrTexture(`coin-${face}-metalness.png`),
     aoMap: loadPbrTexture(`coin-${face}-ao.png`),
-    metalness: 1,
+    displacementMap: loadPbrTexture(`coin-${face}-height.png`),
+    displacementScale: 0.0095,
+    displacementBias: 0,
+    alphaTest: 0.5,
+    metalness: 0.85,
     roughness: 1,
-    envMapIntensity: 0.7
+    envMapIntensity: 0.65
+  });
+}
+
+/**
+ * 外郭/内郭材质：磨损黄铜——比钱面更亮更光滑，
+ * 主光扫过时郭缘先亮，是铜钱轮廓读得清的关键。
+ */
+export function createCoinRimMaterial(): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color: 0xcda35c,
+    metalness: 0.85,
+    roughness: 0.28,
+    envMapIntensity: 0.9
   });
 }
 
@@ -124,8 +145,9 @@ export function createTableMaterial(): THREE.MeshStandardMaterial {
     normalMap: repeatTable(loadPbrTexture('table-normal.png')),
     roughnessMap: repeatTable(loadPbrTexture('table-roughness.png')),
     aoMap: repeatTable(loadPbrTexture('table-ao.png')),
+    color: 0x9c6f4a,
     metalness: 0.06,
     roughness: 1,
-    envMapIntensity: 0.35
+    envMapIntensity: 0.22
   });
 }

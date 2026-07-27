@@ -4,9 +4,12 @@
 import * as THREE from 'three';
 import {
   COIN_FACE_OFFSET,
+  COIN_SURFACE_EXT,
   TABLETOP_COIN_THICKNESS,
   createCoinBodyGeometry,
-  createCoinFaceGeometry
+  createCoinReliefPlateGeometry,
+  createInnerRimGeometry,
+  createOuterRimGeometry
 } from '../physics/coinGeometry';
 import { TABLETOP_COIN_RADIUS } from '../physics/coinDimensions';
 import { faceNormalYFromQuaternion } from '../physics/faceReader';
@@ -14,7 +17,8 @@ import type { QuaternionTuple, Vec3Tuple } from '../physics/physicalTossInput';
 import {
   createCoinCapMaterial,
   createCoinEdgeMaterial,
-  createCoinFaceMaterial,
+  createCoinReliefMaterial,
+  createCoinRimMaterial,
   disposePbrMaterial
 } from './materials';
 
@@ -24,12 +28,17 @@ export interface CoinView {
   dispose: () => void;
 }
 
-const FACE_LIFT = TABLETOP_COIN_THICKNESS / 2 + COIN_FACE_OFFSET + 0.0012;
+const CAP_Y = TABLETOP_COIN_THICKNESS / 2;
+const PLATE_Y = CAP_Y + COIN_FACE_OFFSET;
+const RIM_BASE_Y = CAP_Y + 0.0005;
 
 /**
  * Build one coin. Geometry is rotated so the coin's face normal aligns
  * with the physics body's local +Y axis: identity rotation means heads
  * up, matching the faceReader convention exactly.
+ *
+ * 结构：挤出钱体（方孔 + 倒角）承载轮廓；位移浮雕面片给出字口起伏；
+ * 外郭（车削环带）与内郭（方框挤出）是真实几何，主光下郭缘先亮。
  */
 function createCoinGroup(): { group: THREE.Group; dispose: () => void } {
   const bodyGeometry = createCoinBodyGeometry();
@@ -37,33 +46,66 @@ function createCoinGroup(): { group: THREE.Group; dispose: () => void } {
 
   const capMaterial = createCoinCapMaterial();
   const edgeMaterial = createCoinEdgeMaterial();
-  const headsMaterial = createCoinFaceMaterial('heads');
-  const tailsMaterial = createCoinFaceMaterial('tails');
+  const rimMaterial = createCoinRimMaterial();
+  const headsMaterial = createCoinReliefMaterial('heads');
+  const tailsMaterial = createCoinReliefMaterial('tails');
 
   const body = new THREE.Mesh(bodyGeometry, [capMaterial, edgeMaterial]);
   body.castShadow = true;
   body.receiveShadow = true;
 
-  const headsGeometry = createCoinFaceGeometry();
-  headsGeometry.rotateX(-Math.PI / 2);
-  const headsFace = new THREE.Mesh(headsGeometry, headsMaterial);
-  headsFace.position.y = FACE_LIFT;
+  const headsPlateGeometry = createCoinReliefPlateGeometry();
+  headsPlateGeometry.rotateX(-Math.PI / 2);
+  const headsPlate = new THREE.Mesh(headsPlateGeometry, headsMaterial);
+  headsPlate.position.y = PLATE_Y;
 
-  const tailsGeometry = createCoinFaceGeometry();
-  tailsGeometry.rotateX(Math.PI / 2);
-  const tailsFace = new THREE.Mesh(tailsGeometry, tailsMaterial);
-  tailsFace.position.y = -FACE_LIFT;
+  const tailsPlateGeometry = createCoinReliefPlateGeometry();
+  tailsPlateGeometry.rotateX(Math.PI / 2);
+  const tailsPlate = new THREE.Mesh(tailsPlateGeometry, tailsMaterial);
+  tailsPlate.position.y = -PLATE_Y;
+
+  const headsRimGeometry = createOuterRimGeometry();
+  const headsRim = new THREE.Mesh(headsRimGeometry, rimMaterial);
+  headsRim.position.y = RIM_BASE_Y;
+  headsRim.castShadow = true;
+
+  const tailsRimGeometry = createOuterRimGeometry();
+  tailsRimGeometry.rotateX(Math.PI);
+  const tailsRim = new THREE.Mesh(tailsRimGeometry, rimMaterial);
+  tailsRim.position.y = -RIM_BASE_Y;
+  tailsRim.castShadow = true;
+
+  const headsInnerGeometry = createInnerRimGeometry();
+  headsInnerGeometry.rotateX(-Math.PI / 2);
+  const headsInner = new THREE.Mesh(headsInnerGeometry, rimMaterial);
+  headsInner.position.y = RIM_BASE_Y;
+  headsInner.castShadow = true;
+
+  const tailsInnerGeometry = createInnerRimGeometry();
+  tailsInnerGeometry.rotateX(Math.PI / 2);
+  const tailsInner = new THREE.Mesh(tailsInnerGeometry, rimMaterial);
+  tailsInner.position.y = -RIM_BASE_Y;
+  tailsInner.castShadow = true;
 
   const group = new THREE.Group();
-  group.add(body, headsFace, tailsFace);
+  group.add(body, headsPlate, tailsPlate, headsRim, tailsRim, headsInner, tailsInner);
+
+  const geometries = [
+    bodyGeometry,
+    headsPlateGeometry,
+    tailsPlateGeometry,
+    headsRimGeometry,
+    tailsRimGeometry,
+    headsInnerGeometry,
+    tailsInnerGeometry
+  ];
+  const materials = [capMaterial, edgeMaterial, rimMaterial, headsMaterial, tailsMaterial];
 
   return {
     group,
     dispose: () => {
-      bodyGeometry.dispose();
-      headsGeometry.dispose();
-      tailsGeometry.dispose();
-      [capMaterial, edgeMaterial, headsMaterial, tailsMaterial].forEach(disposePbrMaterial);
+      geometries.forEach((geometry) => geometry.dispose());
+      materials.forEach(disposePbrMaterial);
     }
   };
 }
@@ -137,10 +179,10 @@ export function chargingCoinPose(
   ];
 
   // 向上跳而不向下穿：中心高度 = 静止高度 + 上跳量，且永远不低于
-  // 当前倾斜角下的垂直占位（含面片浮雕余量）。
+  // 当前倾斜角下的垂直占位（含外郭/内郭浮雕余量）。
   const normalY = Math.abs(faceNormalYFromQuaternion(rotation));
   const verticalExtent =
-    (TABLETOP_COIN_THICKNESS / 2 + COIN_FACE_OFFSET) * normalY +
+    (TABLETOP_COIN_THICKNESS / 2 + COIN_SURFACE_EXT) * normalY +
     TABLETOP_COIN_RADIUS * Math.sqrt(Math.max(0, 1 - normalY * normalY));
   const y = Math.max(idle.position[1] + hop, verticalExtent + 0.002);
 

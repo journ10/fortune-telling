@@ -28,8 +28,39 @@ interface CastingHudProps {
   physicsReady: boolean;
 }
 
-function phaseInstruction(
-  phase: CastingPhase,
+/** 结果链路相位：成卦后印鉴环退场，把画面让给卦单。 */
+const RESULT_PHASES: ReadonlySet<CastingPhase> = new Set([
+  'result',
+  'reading',
+  'reading-ready',
+  'reading-error'
+]);
+
+/** 印鉴环：铜钱方孔 + 环字慢转，起卦期间的仪式签名（纯装饰）。 */
+function SealRing() {
+  return (
+    <svg className="sealRing" viewBox="0 0 120 120" aria-hidden="true">
+      <defs>
+        <path
+          id="sealRingTextPath"
+          d="M60,60 m-45,0 a45,45 0 1,1 90,0 a45,45 0 1,1 -90,0"
+          fill="none"
+        />
+      </defs>
+      <circle cx="60" cy="60" r="31" />
+      <rect x="52" y="52" width="16" height="16" />
+      <g className="sealRingSpin">
+        <text>
+          <textPath href="#sealRingTextPath">
+            铜钱六爻 · 物理成卦 · 铜钱六爻 · 物理成卦 ·
+          </textPath>
+        </text>
+      </g>
+    </svg>
+  );
+}
+
+function phaseInstruction(  phase: CastingPhase,
   physicsReady: boolean,
   chargeSource: ChargeSource,
   motionListening: boolean
@@ -76,6 +107,9 @@ export default function CastingHud({
     <div className="castingHud">
       <section className="hudProgress" aria-label="起卦进度">
         <p className="hudCounter">
+          <span className="hudCounterEn" aria-hidden="true">
+            Line {Math.min(throwIndex, TOTAL_LINES)} of {TOTAL_LINES}
+          </span>
           第 {Math.min(throwIndex, TOTAL_LINES)} 爻 <span>/ 共 {TOTAL_LINES} 爻</span>
         </p>
         <ol className="hudLineList">
@@ -114,6 +148,8 @@ export default function CastingHud({
           </p>
         ) : null}
       </section>
+
+      {RESULT_PHASES.has(phase) ? null : <SealRing />}
     </div>
   );
 }
